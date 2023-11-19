@@ -1,0 +1,55 @@
+{
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "clang++ build active (DEBUG, C++17, BoostLib)",
+            "command": "/usr/bin/clang++",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-std=c++17",
+                "-g",
+                "${file}",
+                "-o",
+                "./debug/${fileBasenameNoExtension}.o",
+                "-I", "\"/Users/likchun/Libraries/c++/boost_1_78_0\""
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Debug current file with C++17 and BoostLib."
+        },
+        {
+            "type": "cppbuild",
+            "label": "clang++ build active (C++17, BoostLib)",
+            "command": "/usr/bin/clang++",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-std=c++17",
+                "-O3",
+                "${file}",
+                "-o",
+                "./build/${fileBasenameNoExtension}.o",
+                "-I", "\"/Users/likchun/Libraries/c++/boost_1_78_0\""
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Build current file with C++17 and BoostLib."
+        }
+    ],
+    "version": "2.0.0"
+}
