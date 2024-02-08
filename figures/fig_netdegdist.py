@@ -5,7 +5,6 @@ from scripts.libs.mylib4 import qgraph, NeuronalNetwork
 from matplotlib import pyplot as plt
 from scipy import stats
 import numpy as np
-# qgraph.modern_style()
 qgraph.config_font("avenir")
 qgraph.default_legend_style()
 
@@ -24,6 +23,7 @@ gausfit_y = stats.norm.pdf(gausfit_x,m_fit,s_fit)
 axes[1].plot(gausfit_x, gausfit_y*1000, "g--")
 axes[0].set(xlabel="in-degree $k_{{in}}$",ylabel="number of occurrence")
 axes[1].set(xlabel="out-degree $k_{{out}}$")
+axes[0].set(xticks=[0,2,4,6,8,10])
 axes[0].set(xlim=(0,10),ylim=(0,None))
 axes[1].set(xlim=(0,23),ylim=(0,None))
 axes[0].legend()
