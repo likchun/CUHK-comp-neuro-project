@@ -176,7 +176,7 @@ def _main(dt, num_neuron, steps_list, max_cutoff, bin_width, min_void, min_burst
     return burst_ranges_list
 
 
-def burst_ranges_list(spike_steps:np.ndarray, stepsize_ms:float, num_neuron:int, save_dir=None):
+def bursting_fraction(spike_steps:np.ndarray, stepsize_ms:float, num_neuron:int, save_dir=None):
     # burst_ranges_list is a list of list of range
     #   1st dim: different neurons
     #   2nd dim: different bursts
@@ -191,8 +191,5 @@ def burst_ranges_list(spike_steps:np.ndarray, stepsize_ms:float, num_neuron:int,
         with open(os.path.join(save_dir,"burst_ranges_list.pkl"), "wb") as f:
             pickle.dump(burst_ranges_list, f, pickle.HIGHEST_PROTOCOL)
         np.save(os.path.join(save_dir,"burst_mask.npy"), burst_mask)
-    bursting_fraction = burst_mask
+    bursting_fraction = burst_mask.mean()
     return bursting_fraction
-
-
-# from mylib4 import 
