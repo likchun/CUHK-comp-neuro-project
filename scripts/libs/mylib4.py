@@ -3,7 +3,7 @@ MyLib4
 ------
 Tools & templates
 
-Last update: 12 Jan, 2024 (pm)
+Last update: 8 Feb, 2024 (pm)
 """
 
 import os
@@ -50,7 +50,7 @@ def load_stimulus(filepath:str, returnInfo=False):
         - [5] driving frequency f_d (Hz)
         - [6] stimulus amplitude A
         - [7] stimulus bias B"""
-    content = np.array(csv.reader(open(filepath,'r',newline=''),delimiter='\t'),dtype=object)
+    content = np.array(list(csv.reader(open(filepath,'r',newline=''),delimiter='\t')),dtype=object)
     stim_info = content[0]
     for i in [0,1,2,3,5,6,7]: stim_info[i] = float(stim_info[i])
     if returnInfo: return np.array(content[1],dtype=int), np.array(content[2],dtype=float), stim_info
@@ -123,13 +123,13 @@ def get_autocovariance(x:np.ndarray, neglags=False):
     if not neglags: return np.correlate(x_centered, x_centered, mode="full")[x.size - 1:] / x.size
     else: return np.correlate(x_centered, x_centered, mode="full") / x.size
 
-def power_spectral_density(x, sampfreq_Hz:float):
+def power_spectral_density(x:np.ndarray, sampfreq_Hz:float):
     """Return a tuple:
     - sampling frequency (Hz)
     - power spectral density"""
     return signal.periodogram(x, sampfreq_Hz, scaling="density")
 
-def power_spectral_density_normalized(x, sampfreq_Hz:float):
+def power_spectral_density_normalized(x:np.ndarray, sampfreq_Hz:float):
     """The power spectrum is normalized by dividing all densities
     with the total area under curve, such that the graph may be 
     interpreted as a probability density function of the frequencies.
@@ -148,7 +148,7 @@ class FilterButterworth():
     def filter_signal(self, x):
         return signal.lfilter(*self.butterworth_coeff, x)
 
-def prob_dens(data, binsize:float, min_val="auto", max_val="auto"):
+def prob_dens(data:np.ndarray, binsize:float, min_val="auto", max_val="auto"):
     """Return a tuple:\n
     - mid-point of bins
     - probability density"""
@@ -165,21 +165,21 @@ def prob_dens(data, binsize:float, min_val="auto", max_val="auto"):
     density, binedge = np.histogram(data, bins=bins, density=True)
     return (binedge[1:]+binedge[:-1])/2, density
 
-def prob_dens_CustomBin(data, bins):
+def prob_dens_CustomBin(data:np.ndarray, bins:np.ndarray):
     """Return a tuple:\n
     - mid-point of bins
     - probability density"""
     density, binedge = np.histogram(data, bins=bins, density=True)
     return (binedge[1:]+binedge[:-1])/2, density
 
-def cumu_dens(data):
+def cumu_dens(data:np.ndarray):
     """Return a tuple:\n
     - data in discrete step
     - cumulative probability density"""
     data_sorted = np.sort(data)
     return np.concatenate([data_sorted,data_sorted[[-1]]]), np.arange(data_sorted.size+1)
 
-def break_at_discontinuity(sequence, lower_discont:float, upper_discont:float, threshold=.999):
+def break_at_discontinuity(sequence:np.ndarray, lower_discont:float, upper_discont:float, threshold=.999):
     sequence = sequence.copy()
     sequence[np.where(sequence <= threshold*lower_discont)[0]] = np.nan
     sequence[np.where(sequence >= threshold*upper_discont)[0]] = np.nan
@@ -292,7 +292,7 @@ class NeuronalNetwork:
     @property
     def connection_prob(self):
         """Find the connection probability defined by [number of links/total number of possible links]."""
-        return self.num_of_links/self.size**2
+        return self.num_link/self.size**2
 
     @property
     def in_degree(self):
@@ -375,6 +375,7 @@ class NeuronalDynamics:
         self._stepsize_ms = stepsize_ms
         self._duration_ms = duration_ms
         self._num_step = int(duration_ms/stepsize_ms)
+        self._num_step_orig = int(duration_ms/stepsize_ms)
         self.spike_steps = load_spike_steps(os.path.join(self._directory,"spks.txt"))
         self._spike_times = None
         self._spike_train = None
@@ -386,7 +387,6 @@ class NeuronalDynamics:
         self.time_series = None
 
     def _reset_all(self):
-        self._num_step = None
         self._spike_times = None
         self._spike_train = None
         self._spike_count = None
@@ -394,7 +394,7 @@ class NeuronalDynamics:
         self._interspike_intervals = None
         self._avg_spike_rate_binned = None
         self._avg_spike_rate_gauskern = None
-        self.time_series = None
+        # self.time_series = None
 
     @property
     def spike_steps(self): return self._spike_steps
@@ -435,52 +435,58 @@ class NeuronalDynamics:
 
     class _time_series_handler:
 
-        def __init__(self, num_neuron, potential_filepath="memp.bin",recovery_filepath="recv.bin",
-            current_filepath="curr.bin", conductance_exc_filepath="gcde.bin",
-            conductance_inh_filepath="gcdi.bin", stoch_current_filepath="stoc.bin"):
+        def __init__(self, num_neuron:int,
+            potential_filepath="memp.bin", recovery_filepath="recv.bin",
+            conductance_exc_filepath="gcde.bin", conductance_inh_filepath="gcdi.bin",
+            synap_current_filepath="isyn.bin", stoch_current_filepath="stoc.bin"):
             self._num_neuron = num_neuron
+            self._num_trim_step = 0
             self._v_filepath = potential_filepath
             self._u_filepath = recovery_filepath
-            self._i_filepath = current_filepath
+            self._synapi_filepath = synap_current_filepath
             self._ge_filepath = conductance_exc_filepath
             self._gi_filepath = conductance_inh_filepath
             self._stochi_filepath = stoch_current_filepath
 
         @property
         def membrane_potential(self):
-            try: return load_time_series(self._v_filepath, num_neuron=self._num_neuron)
+            try: return load_time_series(self._v_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
             except FileNotFoundError: print("warning: no membrane potential series file \"{}\"".format(self._v_filepath))
 
         @property
         def recovery_variable(self):
-            try: return load_time_series(self._u_filepath, num_neuron=self._num_neuron)
+            try: return load_time_series(self._u_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
             except FileNotFoundError: print("warning: no recovery variable series file \"{}\"".format(self._u_filepath))
 
         @property
         def presynaptic_current(self):
-            try: return load_time_series(self._i_filepath, num_neuron=self._num_neuron)
-            except FileNotFoundError: print("warning: no presynaptic current series file \"{}\"".format(self._i_filepath))
+            try: return load_time_series(self._synapi_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            except FileNotFoundError: print("warning: no presynaptic current series file \"{}\"".format(self._synapi_filepath))
 
         @property
         def conductance_exc(self):
-            try: return load_time_series(self._ge_filepath, num_neuron=self._num_neuron)
+            try: return load_time_series(self._ge_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
             except FileNotFoundError: print("warning: no presynaptic EXC conductance series file \"{}\"".format(self._ge_filepath))
 
         @property
         def conductance_inh(self):
-            try: return load_time_series(self._gi_filepath, num_neuron=self._num_neuron)
+            try: return load_time_series(self._gi_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
             except FileNotFoundError: print("warning: no presynaptic INH conductance series file \"{}\"".format(self._gi_filepath))
 
         @property
         def stochastic_current(self):
-            try: return load_time_series(self._stochi_filepath, num_neuron=self._num_neuron)
+            try: return load_time_series(self._stochi_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
             except FileNotFoundError: print("warning: no stochastic current series file \"{}\"".format(self._stochi_filepath))
 
-    def time_series_data_from_file(self, num_neuron, potential_filepath="memp.bin", recovery_filepath="recv.bin",
-            current_filepath="curr.bin", conductance_exc_filepath="gcde.bin", conductance_inh_filepath="gcdi.bin",
-            stoch_current_filepath="stoc.bin"):
-        self.time_series = self._time_series_handler(num_neuron,potential_filepath,recovery_filepath,
-            current_filepath, conductance_exc_filepath,conductance_inh_filepath, stoch_current_filepath)
+        def set_trim_transient_duration(self, transient_beg_t_ms:float, stepsize_ms:float):
+            self._num_trim_step = int(transient_beg_t_ms/stepsize_ms)
+
+    def time_series_data_from_file(self, num_neuron:int,
+            potential_filepath="memp.bin", recovery_filepath="recv.bin",
+            conductance_exc_filepath="gcde.bin", conductance_inh_filepath="gcdi.bin",
+            synap_current_filepath="curr.bin", stoch_current_filepath="stoc.bin"):
+        self.time_series = self._time_series_handler(num_neuron, potential_filepath, recovery_filepath,
+            conductance_exc_filepath, conductance_inh_filepath, synap_current_filepath, stoch_current_filepath)
 
 
 class QuickGraph:
@@ -516,10 +522,12 @@ class QuickGraph:
     def raster_plot(self, spike_times, ax=None, colors=None, time_range=["auto","auto"], **options):
         """Units of `beg_t` and `end_t` are millisecond (ms). Neuron index starts from 1."""
         if colors is None: colors = ["k" for _ in range(spike_times.size)]
+        elif type(colors)==str: colors = [colors for _ in range(spike_times.size)]
         if time_range[0] == "auto": time_range[0] = float(np.amin([x[0] for x in spike_times if x.size != 0]))
         if time_range[1] == "auto": time_range[1] = float(np.amax([x[-1] for x in spike_times if x.size != 0]))
         spike_times = np.array([x[np.where((time_range[0] < np.array(x)) & (np.array(x) < time_range[1]))] for x in spike_times],dtype=object)
-        [ax.plot(x/1000, np.full(x.size, i+1), c=colors[i], marker="o", ms=.4, lw=0, **options) for i,x in enumerate(spike_times)]
+        # [ax.scatter(x/1000, np.full(x.size, i+1), c=colors[i], lw=0, **options) for i,x in enumerate(spike_times)]
+        [ax.plot(x/1000, np.full(x.size, i+1), c=colors[i], lw=0, **options) for i,x in enumerate(spike_times)]
 
     def event_plot(self, spike_times, ax=None, colors=None, time_range=["auto","auto"], **options):
         """Units of `beg_t` and `end_t` are millisecond (ms). Neuron index starts from 1."""
@@ -563,7 +571,7 @@ class QuickGraph:
     def default_legend_style(self):
         plt.rcParams["legend.fontsize"] = 16
         plt.rcParams["legend.frameon"] = True
-        plt.rcParams["legend.fancybox"] = True
+        plt.rcParams["legend.fancybox"] = False
         plt.rcParams["legend.facecolor"] = (1, 1, 1)
         plt.rcParams["legend.edgecolor"] = (0, 0, 0)
         plt.rcParams["legend.framealpha"] = .95
@@ -625,6 +633,7 @@ class NeuroData:
         - `stepsize_ms`: float
         - `sampfreq_Hz`: float
         - `duration_ms`: float
+        - `num_step`: int
         - `const_current`: float
         - `weightscale_factor`: float
         - `exp_trunc_step_exc`: int
@@ -649,6 +658,7 @@ class NeuroData:
         if type(self.configs["duration_ms"])==str: self.configs["duration_ms"] = float(self.configs["duration_ms"])
         if type(self.configs["stepsize_ms"])==str: self.configs["stepsize_ms"] = float(self.configs["stepsize_ms"])
         self.configs["sampfreq_Hz"] = 1000/self.configs["stepsize_ms"]
+        self.configs["num_step"] = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
         yaml.dump(self.configs, open(os.path.join(directory, "sett.yml"), 'w'), default_flow_style=False)
 
         self.network = NeuronalNetwork()
@@ -662,15 +672,38 @@ class NeuroData:
 
         self.dynamics = NeuronalDynamics(os.path.join(directory),self.configs["stepsize_ms"],self.configs["duration_ms"])
         self.dynamics.time_series_data_from_file(self.configs["num_neuron"],
-                os.path.join(directory,"memp.bin"),os.path.join(directory,"recv.bin"),
-                os.path.join(directory,"isyn.bin"),os.path.join(directory,"gcde.bin"),
-                os.path.join(directory,"gcdi.bin"),os.path.join(directory,"stoc.bin"))
+            os.path.join(directory,"memp.bin"),os.path.join(directory,"recv.bin"),
+            os.path.join(directory,"gcde.bin"),os.path.join(directory,"gcdi.bin"),
+            os.path.join(directory,"isyn.bin"),os.path.join(directory,"stoc.bin"))
 
     def trim_transient_dynamics(self, transient_beg_t_ms:float):
         self.dynamics._reset_all()
         self.dynamics.spike_steps = trim_spike_steps(self.dynamics.spike_steps,transient_beg_t_ms,self.configs["duration_ms"],self.configs["stepsize_ms"])-int(transient_beg_t_ms/self.configs["stepsize_ms"])
         self.configs["duration_ms"] -= transient_beg_t_ms
+        self.dynamics._duration_ms -= transient_beg_t_ms
         self.dynamics._num_step = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
+        self.dynamics.time_series.set_trim_transient_duration(transient_beg_t_ms,self.configs["stepsize_ms"])
+
+    def remove_neurons(self, remove_index:list):
+        """`remove_index`: a list of indices of neurons to be removed"""
+        self.neuron_mask = np.full(self.configs["num_neuron"], True)
+        self.neuron_mask[remove_index] = False
+        self.configs["num_neuron"] -= len(remove_index)
+        self.dynamics._reset_all()
+        self.dynamics.spike_steps = self.dynamics.spike_steps[self.neuron_mask]
+        if self._netFound:
+            self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(self.neuron_mask),np.array(self.neuron_mask))]
+
+    def retain_neurons(self, retain_index:list):
+        """`remove_index`: a list of indices of neurons to be retained, other neurons are removed"""
+        self.neuron_mask = np.full(self.configs["num_neuron"], False)
+        self.neuron_mask[retain_index] = True
+        self.configs["num_neuron"] = len(retain_index)
+        self.dynamics._reset_all()
+        self.dynamics.spike_steps = self.dynamics.spike_steps[self.neuron_mask]
+        if self._netFound:
+            self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(self.neuron_mask),np.array(self.neuron_mask))]
+
 
 
 qgraph = QuickGraph()
@@ -679,3 +712,6 @@ qgraph.stix_style()
 # qgraph.serif_style()
 # qgraph.typewriter_style()
 qgraph.default_legend_style()
+
+
+"""gridspec_kw={"width_ratios":[.7,1]}"""
