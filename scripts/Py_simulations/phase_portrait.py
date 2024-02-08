@@ -2,7 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import ode
 
-plt.rc("font", family="courier", size=20)
+# plt.rc("font", family="courier", size=20)
+plt.rc("font", family="avenir", size=20)
 
 
 """Settings"""
@@ -10,11 +11,12 @@ plt.rc("font", family="courier", size=20)
 
 # I = 3.79
 I = 0
-a = 0.02
+a = 0.1
 b = 0.2
-c = -50
+c = -65
 d = 2
-init_point  = {"v": -62.5, "u": -12.5}
+# init_point  = {"v": -62.5, "u": -12.5}
+init_point  = {"v": -70, "u": -14}
 vfield_range = {"v": (-80, -45), "u": (-15, -5)}
 
 
@@ -23,12 +25,14 @@ ode_stepsize = 0.005
 
 v_peak = 30
 
+recovery_reversal_potential = 0
 
 
 
 # I = lambda t: ...
 dv = lambda x, t: 0.04*x[0]*x[0] + 5*x[0] + 140 - x[1] + I
-du = lambda x: a*(b*x[0] - x[1])
+# dv = lambda x, t: 0.04*x[0]*x[0] + 5*x[0] + 140 - 0 + I
+du = lambda x: a*(b*x[0] - x[1] - recovery_reversal_potential)
 def vField_izhikevich(t, x): return [dv(x, t), du(x)] # Define vector field
 
 def v_nullcline(vfield_range): # dv/dt = 0
@@ -87,7 +91,7 @@ for xy in fixed_points():
 ax.scatter([],[], c="none", marker='s', edgecolor='k', linewidths=1.5, label="fixed point")
 # initial point
 ic = (init_point["v"], init_point["u"])
-ax.scatter(ic[0], ic[1], c='b', label="initial val", zorder=6)
+ax.scatter(ic[0], ic[1], c='b', label="initial value", zorder=6)
 # trajectory
 ode = ode(vField_izhikevich)
 ode.set_integrator("vode", nsteps=500, method="bdf") # BDF method suited to stiff systems of ODEs
@@ -107,6 +111,7 @@ while ode.successful() and (ode.t < duration):
 print("TOTAL STEPS: {}".format(step))
 resets.append(step)
 ts, vu = np.array(ts), np.array(vu)
+
 num_spk = len(resets)-2
 if num_spk < 1:
     ax.plot(*vu.T, color='r', zorder=5)
@@ -137,13 +142,21 @@ ax.set_title("Phase portrait of\nIzhikevich's neuron spiking model", fontdict=di
 ax.set(xlabel="Membrane potential v (mV)", ylabel="Recovery variable u")
 ax.set(xlim=(vfield_range["v"][0], v_peak+3))
 ax.set(ylim=(vfield_range["u"][0], vfield_range["u"][1]))
+plt.tight_layout()
+
+
+fig,ax = plt.subplots(figsize=(10,5))
+ax.plot(ts,vu.T[0],c="k")
+ax.plot(ts,vu.T[1],c="darkorange")
+ax.set(xlabel="time (s)")
+plt.tight_layout()
+
 
 # info
 print("NUMBER OF SPIKES: {:d}".format(num_spk))
 print("FIXED POINTS:")
 print(fixed_points())
 
-plt.tight_layout()
 plt.show()
 # fig.savefig("phase portrait.png")
 

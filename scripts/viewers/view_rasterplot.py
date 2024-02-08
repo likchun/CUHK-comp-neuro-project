@@ -1,23 +1,24 @@
-from libs.mylib3 import SimulationData, graphing
-from matplotlib import pyplot as plt
+import os
 import sys
+this_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.join(this_dir,".."))
+from libs.mylib4 import NeuroData, qgraph
+from matplotlib import pyplot as plt
 try: data_directory = str(sys.argv[1])
 except IndexError: print("missing required argument: \"data_directory\"\n> for example: /Users/data/output"); exit(1)
 
 ################################################################################
 
-# data_directory = "/Users/likchun/NeuroProject/..."
+directory = "/Users/likchun/NeuroProject/..."
 
 ################################################################################
 
 
-sd = SimulationData(data_directory,transient_time_ms=000)
-fig, [ax1,ax2] = plt.subplots(2,1,figsize=(12,7),sharex=True,sharey=True)
-graphing.raster_plot_network(sd.dynamics.spike_times,ax=ax1)
-graphing.raster_plot_network(sd.dynamics.spike_times,sort_by_spike_count=True,separate_neuron_type=sd.network.neuron_type,ax=ax2)
-ax1.set(xlim=(0,sd.settings["duration_ms"]/1000),ylim=(1,sd.settings["neuron_num"]))
-ax1.set(ylabel="neuron index")
-ax2.set(xlabel="time (s)",ylabel="neuron index")
+nd = NeuroData(directory)
+fig, ax = plt.subplots(figsize=(10,5))
+qgraph.raster_plot(nd.dynamics.spike_times,ax=ax)
+ax.set(xlim=(0,nd.configs["duration_ms"]/1000),ylim=(1,nd.configs["num_neuron"]))
+ax.set(ylabel="neuron",xlabel="time (s)")
 plt.tight_layout()
 plt.show()
 

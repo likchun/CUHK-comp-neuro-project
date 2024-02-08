@@ -59,7 +59,7 @@ class PLVtool:
     def __init__(self) -> None:
         """
         Steps to calculate the phase-locking value (PLV) from the membrane potential signals:\n
-        1. (Optional) call functions `configure_bandpass_filter`, `configure_discard_times`.\n
+        1. (Optional) call functions `configure_bandpass_filter`, `configure_general`.\n
         2. Call function `import_data` to obtain the band-pass filtered voltage signals.\n
         3. Call function `compute_plv` to calculate the pairwise PLVs.\n
         """
@@ -75,43 +75,44 @@ class PLVtool:
         self._isBandFiltered = enable
         self.lowcut, self.highcut = lowcut, highcut
 
-    def configure_discard_times(self, discard_dynamics_time_ms=0, discard_phaseseries_time_ms=0):
-        """Unit of time: millisecond (ms). You can choose to discard the transient time at the start of the
-        dynamics (`discard_dynamics_time_ms`), and further discard the unwanted time in the extracted
-        phase time series (`discard_phaseseries_time_ms`)."""
-        self._discard_dynamics_time_s = discard_dynamics_time_ms/1000
-        self._discard_phaseseries_time_s = discard_phaseseries_time_ms/1000
+    def configure_general(self, discard_dynamics_time=0, discard_phaseseries_time=0):
+        """Unit of time: second. You can choose to discard the transient time at the start of the
+        dynamics (`discard_dynamics_time`), and further discard the unwanted time in the extracted
+        phase time series (`discard_phaseseries_time`)."""
+        self._discard_dynamics_time = discard_dynamics_time
+        self._discard_phaseseries_time = discard_phaseseries_time
 
     def import_data(self, voltage_signals, dt_ms: float, shiftbyMedian=True):
         """Obtain band-pass filtered signals from membrane potential time series.
         Configure band-pass filter settings in `configure_bandpass_filter`."""
         self._num_neuron = voltage_signals.shape[0]
         self._fs = 1000/dt_ms # sampling frequency
-        signals_unfiltered = voltage_signals[:,int(self._discard_dynamics_time_s*self._fs):]
+        signals_unfiltered = voltage_signals[:,int(self._discard_dynamics_time*self._fs):]
         if shiftbyMedian: signals_unfiltered -= np.median(signals_unfiltered,1)[:,np.newaxis]
         if voltage_signals.shape[0] < 10: self.signals_unfiltered = signals_unfiltered
         print("> data imported - OK")
         # bandpass filter #
-        if self._isBandFiltered: self.signals = np.array([_band_filter_butter(s, [self.lowcut,self.highcut], fs=self._fs, btype="bandpass") for s in signals_unfiltered])
-        # if self._isBandFiltered: self.signals = np.array([_band_filter_butter(s, self.lowcut, fs=self._fs, btype="highpass") for s in signals_unfiltered])
+        # if self._isBandFiltered: self.signals = np.array([_band_filter_butter(s, [self.lowcut,self.highcut], fs=self._fs, btype="bandpass") for s in signals_unfiltered])
+        if self._isBandFiltered: self.signals = np.array([_band_filter_butter(s, self.highcut, fs=self._fs, btype="lowpass") for s in signals_unfiltered])
         else: self.signals = np.array(signals_unfiltered)
         print("> band-pass filtered - OK")
         return self.signals
 
-    def get_instantaneous_phases(self, unwarp=True):
+    def get_instantaneous_phases(self, unwarp=False):
         """Obtain the phase time series extracted by Hilbert transform."""
-        if unwarp: return np.array([np.unwrap(np.angle(hilbert(s))) for s in self.signals])
-        else: return np.array([np.angle(hilbert(s)) for s in self.signals])
+        # self.phases = self.get_instantaneous_phases()[:,int(self._discard_phaseseries_time*self._fs):]
+        if unwarp: self.phases = np.array([np.unwrap(np.angle(hilbert(s))) for s in self.signals])[:,int(self._discard_phaseseries_time*self._fs):]
+        else: self.phases = np.array([np.angle(hilbert(s)) for s in self.signals])[:,int(self._discard_phaseseries_time*self._fs):]
+        return self.phases
 
     def compute_plv(self):
         """Return a tuple with two elements:\n
         - global PLV, float
         - pairwise PLVs, numpy.ndarray (lower-left matrix elements)
         """
-        phases = self.get_instantaneous_phases()[:,int(self._discard_phaseseries_time_s*self._fs):]
-        total_timesteps = phases.shape[1]
+        total_timesteps = self.phases.shape[1]
         print("> phases obtained from Hilbert transform - OK")
-        self.pairwiseplv = np.hstack([[np.abs(np.sum(np.exp(1j*(phases[i]-phases[j])))) for j in range(i)] for i in range(1,self._num_neuron)])/total_timesteps
+        self.pairwiseplv = np.hstack([[np.abs(np.sum(np.exp(1j*(self.phases[i]-self.phases[j])))) for j in range(i)] for i in range(1,self._num_neuron)])/total_timesteps
         self.globalplv = np.sum(self.pairwiseplv)/(self._num_neuron*(self._num_neuron-1)/2)
         print("> global PLV computed to be {:.4f}".format(self.globalplv))
         return (self.globalplv, fill_lower_trimatrix(self.pairwiseplv))
@@ -123,8 +124,8 @@ class PLVtool:
         """
         gpu_block_size = 1024
         if str(cuda.gpus)=="<Managed Device 0>": print("> GPU CUDA availablity - OK")
-        phases = self.get_instantaneous_phases()[:,int(self._discard_phaseseries_time_s*self._fs):]
-        num_neuron, total_timesteps = phases.shape
+        # phases = self.get_instantaneous_phases()[:,int(self._discard_phaseseries_time*self._fs):]
+        num_neuron, total_timesteps = self.phases.shape
         print("> phases obtained from Hilbert transform - OK")
 
         # GPU code #
@@ -140,7 +141,7 @@ class PLVtool:
         _real = np.zeros((self._num_neuron,self._num_neuron)).astype(np.float32)
         _imag = np.zeros((self._num_neuron,self._num_neuron)).astype(np.float32)
         gpu_grid_size = (self._num_neuron,self._num_neuron,int(np.ceil(total_timesteps/gpu_block_size)))
-        phases_cuda = cuda.to_device(phases)
+        phases_cuda = cuda.to_device(self.phases)
         _real_cuda = cuda.to_device(_real)
         _imag_cuda = cuda.to_device(_imag)
         kernel[gpu_grid_size,gpu_block_size](phases_cuda,_real_cuda,_imag_cuda)

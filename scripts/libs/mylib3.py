@@ -3,7 +3,7 @@ MyLib3
 ------
 Contains useful tools & shortcuts
 
-Last update: 19 November, 2023 (Afternoon)
+Last update: 6 December, 2023 (Morning)
 """
 
 
@@ -85,7 +85,18 @@ def load_time_series(data_file_path: str, num_neuron: int, dtype=np.float32):
     return time_series.reshape((int(time_series.shape[0]/num_neuron), num_neuron)).T
 
 def load_stimulus(filename, returnInfo=False):
-    """Return tuple, [0]: indices of stimulated neurons, [1]: stimulus time series, [2]: stimulus info"""
+    """Return a tuple with three elements:
+    - [0] indices of stimulated neurons, np.array
+    - [1] stimulus time series, np.array
+    - [2] (optional) stimulus info, np.array, contains:
+        - [0] time step size (ms)
+        - [1] stimulated duration (ms)
+        - [2] non-stimulated duration before stimulus (ms)
+        - [3] non-stimulated duration after stimulus (ms)
+        - [4] stimulus name/type
+        - [5] driving frequency f_d (Hz)
+        - [6] stimulus amplitude A
+        - [7] stimulus bias B"""
     content = np.array(list(csv.reader(open(filename,'r',newline=''), delimiter='\t')), dtype=object)
     stim_info = content[0]
     for i in [0,1,2,3,5,6,7]: stim_info[i] = float(stim_info[i])
@@ -282,6 +293,12 @@ def filter_by_coordinates_3D(points_in_3D: list[tuple], region: list[tuple]):
     return np.array([point for point in points_in_3D if is_within_region(point, region)])
 
 def wrap_within_period(x, period=2*np.pi): return (x + period/2) % (period) - period/2
+
+def breakline_at_discontinuities(y,lower_discont,upper_discont,threshold=.998):
+    y = y.copy()
+    y[np.where(y <= threshold*lower_discont)[0]] = np.nan
+    y[np.where(y >= threshold*upper_discont)[0]] = np.nan
+    return y
 
 def fill_lower_trimatrix(trimatrix_flatten):
     size = int(np.sqrt(len(trimatrix_flatten)*2))+1
@@ -505,10 +522,10 @@ class Dynamics:
         # self.spike_train = np.array([spiketrain_from_spikestep(x,int(duration_ms/stepsize_ms)+1) for x in np.array([np.array(spkt/stepsize_ms,dtype=int) for spkt in self.spike_times])])
         # self.spike_train = np.array([spiketrain_from_spikestep(x.astype(int),int(duration_ms/stepsize_ms)+1) for x in load_spike_steps(filename,1)])
         self.spike_count = get_spike_count(self.spike_times)
-        self.mean_firing_rate = get_mean_firing_rate(self.spike_count, duration_ms)
+        self.mean_firing_rate = get_mean_firing_rate(self.spike_count, duration_ms-start_t)
         self.interspike_intervals = get_interspike_intervals(self.spike_times)
         self.timedep_popul_firing_rate = get_timedep_popul_firing_rate_gauskern(self.spike_train,stepsize_ms)
-        self.timedep_popul_firing_rate_binned = get_timedep_popul_firing_rate_binned(self.spike_times,int(duration_ms/5.))[1]
+        self.timedep_popul_firing_rate_binned = get_timedep_popul_firing_rate_binned(self.spike_times,int((duration_ms-start_t)/5.))[1]
 
     def timeseries_data_from_file(self, num_neuron, potential_filename="memp.bin",
             recovery_filename="recv.bin", current_filename="curr.bin", conductance_exc_filename="gcde.bin",
@@ -698,7 +715,7 @@ class Graphing:
         ax.grid(True)
         return x, y
 
-    def raster_plot_network(self, spike_times, start_t='auto', end_t='auto', ax=None, **options):
+    def raster_plot_network(self, spike_times, ax, start_t="auto", end_t="auto", **options):
         """Draw raster plot of neurons in a network.
         `start_t` and `end_t` should be in millisecond (ms).
         Neuron index starts from 1.
@@ -709,27 +726,19 @@ class Graphing:
         - `separate_neuron_type`: list, neuron type of neurons, separate neurons by their types
         (orange: EXC, teal: INH),
         default `False`(do not sort)
-        - `title`: str, figure title, default `None`(hide title)
-        - `ylabel`: str, y-axis label, `'hide'`: hide y-axis, default: neuron indices
         - `color`: str or list, dots color, default `'k'`(black)
         - `alpha`: float, dots transparency, default `1`(opaque)
         """
         """`save_name`: str, save file name, default `''`(do not save)"""
         sort_by_spike_count = False
         separate_neuron_type = []
-        color_by_neuron_type = False
-        save_name, title, ylabel, color, alpha = '', None, "default", 'k', 1
-        zorder = 3
+        colors, alpha, zorder = "k", 1, 3
         for key, value in options.items():
             if key == "sort_by_spike_count": sort_by_spike_count = value
             elif key == "separate_neuron_type": separate_neuron_type = value
-            elif key == "color_by_neuron_type": color_by_neuron_type = value
-            elif key == 'title': title = value
-            elif key == 'ylabel': ylabel = value
-            elif key == 'color': color = value
+            elif key == 'color': colors = value
             elif key == 'alpha': alpha = value
-            elif key == 'zorder': zorder = value
-            elif key == "save_name": save_name = value
+            # elif key == 'zorder': zorder = value
         if start_t == 'auto': start_t = float(np.amin([x[0] for x in spike_times if len(x) != 0]))
         if end_t == 'auto': end_t = float(np.amax([x[-1] for x in spike_times if len(x) != 0]))
 
@@ -749,36 +758,22 @@ class Graphing:
         if not sort_by_spike_count and len(separate_neuron_type) == 0: pass
         else:
             df.sort_values(by=["neuron_type", "spike_count"], ascending=[False, True], inplace=True)
-            if len(separate_neuron_type) != 0: color = list(df["type_color"])
-
-        if ax == None:
-            fig, ax = plt.subplots(figsize=(12,6))
-            if ylabel == 'hide': ax.set_yticks([])
-            elif ylabel == 'default': ax.set(ylabel='Neuron index')
-            else: ax.set(ylabel=ylabel); ax.set_yticks([])
-            ax.set(title=title, xlabel='Time (s)', xlim=(start_t/1000., end_t/1000.), ylim=(-1, len(spike_times)+1))
-        else: ax = ax
+            if len(separate_neuron_type) != 0: colors = list(df["type_color"])
         for i, n_t in enumerate(df["spike_times"]):
             n_t = np.array(n_t)[np.where((start_t < np.array(n_t)) & (np.array(n_t) < end_t))]
-            if type(color) == list: ax.plot(n_t/1000., np.full(len(n_t), i+1), c=color[i], alpha=alpha, marker='o', ms=.5, lw=0, zorder=0)
-            else: ax.plot(n_t/1000., np.full(len(n_t), i+1), c=color, alpha=alpha, marker='o', ms=.5, lw=0, zorder=0)
+            if type(colors) == list: ax.plot(n_t/1000., np.full(len(n_t), i+1), c=colors[i], alpha=alpha, marker="o", ms=.5, lw=0, zorder=0)
+            else: ax.plot(n_t/1000., np.full(len(n_t), i+1), c=colors, alpha=alpha, marker="o", ms=.5, lw=0, zorder=0)
         return ax
 
-    def event_plot_neurons(self, spike_times, start_t="auto", end_t="auto", title="", ax=None) -> None:
+    def event_plot_neurons(self, spike_times, ax, start_t="auto", end_t="auto", colors="k") -> None:
         """Draw a single neuron raster plot, where each vertical
         line represents a spike at the corresponding time.
         `start_t` and `end_t` should be in millisecond (ms)."""
-
         if start_t == "auto": start_t = 0
         if end_t == "auto": end_t = float(np.amax(np.hstack(spike_times)))
-
-        if ax == None:
-            fig, ax = plt.subplots(figsize=(10,3))
-            ax.set_title(title, y=1.02, loc='left')
-            ax.set_yticklabels([])
-            ax.set(xlabel='Time (s)', ylabel='', xlim=(start_t/1000., end_t/1000.))
-        else: ax = ax
-        ax.eventplot(np.array(spike_times, dtype=object)/1000, colors='k')
+        spike_times = [np.array([])]+list(spike_times)
+        if type(colors)==list or type(colors)==np.ndarray: colors = ["k"]+list(colors)
+        ax.eventplot((np.array(spike_times,dtype=object)/1000), colors=colors)
         return ax
 
     def timedep_popul_firing_rate_binned(self, spike_times, resolution_ms: float, start_t=0, end_t="auto",
@@ -1142,4 +1137,7 @@ ax.xaxis.set_minor_locator(plt.MultipleLocator(np.pi/12))
 ax.xaxis.set_major_formatter(plt.FuncFormatter(graphing.multiple_formatter()))
 
 ax.ticklabel_format(axis="y", style="scientific", scilimits=(-3,3), useOffset=False, useLocale=False, useMathText=True)
+
+ax.yaxis.label.set_color("r")
+ax.tick_params(axis="y", colors="r")
 """

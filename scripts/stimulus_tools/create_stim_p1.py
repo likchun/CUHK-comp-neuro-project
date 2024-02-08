@@ -5,19 +5,22 @@
 ######################
 
 stim_name = "sinwave_nonneg"
+stim_id = "stim_p1c"
 fd_Hz = 7 # driving frequency
-A = 4 # stimulus amplitude
+A = 48 # stimulus amplitude
+stim_neuron_frac = 1 # the fraction of all neurons that are subject to the stimulus
 
 # ensure the following values matche the numerical simulation settings #
-stim_neuron_frac = .2 # the fraction of all neurons that are subject to the stimulus
 stim_duration_ms = 4000
 nonstim_duration_beg_ms = 1000
 nonstim_duration_end_ms = 0
-dt_ms = .02
+dt_ms = .01
 
 ######################
 
-
+import sys, os
+this_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.join(this_dir,".."))
 from libs.mylib3 import *
 random.seed(0)
 np.random.seed(0)
@@ -55,7 +58,16 @@ print("total number of stimulated neurons: {}".format(len(stim_nidx)))
 print("fraction of stimulated neurons: {}".format(stim_neuron_frac))
 
 
-outfilename = "stim_p1b[A{},f{},m{}].txt".format(A,fd_Hz,stim_neuron_frac)
+fig, ax = plt.subplots(figsize=(7,3))
+ax.plot(np.arange(len(stimulus))*dt_ms/1000,stimulus,c="k")
+ax.set(xlabel="time (s)",ylabel="")
+ax.set(xlim=(0,(nonstim_duration_beg_ms+stim_duration_ms+nonstim_duration_end_ms)/1000))
+ax.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+outfilename = "{}[A{},f{},m{}].txt".format(stim_id,A,fd_Hz,stim_neuron_frac)
 # Naming:
 # "p" stands for periodic
 # "1" indicates the specific type or form of the stimulus
@@ -68,7 +80,7 @@ outfilename = "stim_p1b[A{},f{},m{}].txt".format(A,fd_Hz,stim_neuron_frac)
 
 infos = [dt_ms,stim_duration_ms,nonstim_duration_beg_ms,nonstim_duration_end_ms,stim_name,fd_Hz,A,B]
 infos = np.array(infos,dtype=str)
-with open(outfilename,"w") as f:
+with open(os.path.join(this_dir,outfilename),"w") as f:
     f.write("\t".join(infos))
     f.write("\n")
     f.write("\t".join(map(str,stim_nidx)))

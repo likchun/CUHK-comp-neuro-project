@@ -3,7 +3,7 @@ AvalancheLib
 ------------
 From Don
 
-Last update: 17 November, 2023
+Last update: 29 November, 2023
 """
 
 import numpy as np
@@ -30,6 +30,11 @@ class AvalancheTool():
         bins = _get_lin_bins(vlim=(0, total_timesteps), bin_width=timebin_width)
         counts = np.histogram(steps_all, bins)[0]
         clusters = [cluster[1:] for cluster in np.split(counts, np.nonzero(counts == 0)[0]) if cluster.sum()]
+        # Find the location of avalanches (work in progress)
+        # indices = bins[np.array([(indices[1], indices[-1] + 1) for indices in np.split(np.arange(len(counts)), np.nonzero(counts == 0)[0]) if len(indices) > 1])]
+        # plt.scatter(steps_all, neurons_all, s=0.01)
+        # plt.hlines(np.full(len(indices), 500), indices[:, 0], indices[:, 1], lw=1000, colors="g", alpha=.4, zorder=-1)
+        # plt.show()
         sizes = np.array([cluster.sum() for cluster in clusters])
         durations = np.array([len(cluster) for cluster in clusters])
         return sizes, durations
