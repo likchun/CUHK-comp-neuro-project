@@ -12,8 +12,8 @@ simulation duration (ms)            = 5000
 time step size (ms)                 = 0.05
 
 [Stochastic current]
-random number generation seed       = 0
 stochastic noise intensity          = 3
+random number generation seed       = 0
 
 [Constant current]
 constant current amplitude          = 0
@@ -32,10 +32,10 @@ for excitatory neurons (ms)         = 500
 [Time series exportation]
 membrane potential (true/false)     = false
 recovery variable or adaptation     = false
-presynaptic current                 = false
+presynaptic input current           = false
 presynaptic exc conductance         = false
 presynaptic inh conductance         = false
-stochastic current                  = false
+stochastic input current            = false
 
 
 #full:      the data file stores a full size NxN matrix

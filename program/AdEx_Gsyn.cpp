@@ -10,14 +10,12 @@
  * 
  * Compile command:
  * (MacOS) clang++ ./AdEx_Gsyn.cpp -std=c++17 -O3 -o ./AdEx_Gsyn.o -I"/Users/likchun/Libraries/c++/boost_1_78_0"
- * (CUHKPHYcluster) icpc src/AdEx_Gsyn.cpp -std=c++14 -O3 -o build/AdEx_Gsyn.o -I/home/user/yourname/lib/boost_1_78_0 -no-multibyte-chars
  * 
  */
 
 
 #include "boost/random.hpp"
 #include <fstream>
-#include <iomanip> // Required for complining the code in CUHK cluster1
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -67,7 +65,7 @@ namespace model_param
 
 /* I-O files & directories */
 #define IN_FNAME_PARAMETERS         "vars.txt"
-#define OUT_FOLDER                     "output"
+#define OUT_FOLDER                  "output"
 #ifdef _WIN32 // For Windows
 #define OUT_FNAME_INFO                     "output\\info.txt"
 #define OUT_FNAME_SETTINGS                 "output\\sett.json"
@@ -105,52 +103,6 @@ namespace datatype_precision
     constexpr const int	DIGIT_DOUBLE = 17;	// use DOUBLE floating point precision for time series output
     const double		PRECISION_FLOAT	 = pow(10, DIGIT_FLOAT);
     const double		PRECISION_DOUBLE = pow(10, DIGIT_DOUBLE);
-};
-
-namespace tools
-{
-    std::string remove_whitespace(std::string &str)
-    {
-        str.erase(remove_if(str.begin(), str.end(), ::isspace), str.end());
-        return str;
-    }
-
-    std::vector<int> string_to_vector_index(std::string &string_of_values, char delimiter)
-    {
-        std::vector<int> res;
-        std::string value;
-        std::stringstream ss(string_of_values);
-        while (getline(ss, value, delimiter)) {
-            res.push_back(std::stoi(tools::remove_whitespace(value))-1); }
-        return res;
-    }
-
-    template<typename T>
-    void print_array(std::vector<T> &array)
-    { for (size_t i = 0; i < array.size(); ++i) { std::cout << array[i] << '\t'; } }
-
-    template<typename T>
-    void print_array(std::vector<T> &array, size_t print_len)
-    { for (size_t i = 0; i < print_len; ++i) { std::cout << array[i] << '\t'; } }
-
-    template<typename T>
-    void export_array2D(std::vector<std::vector<T>> &array2D, std::string &&filename, char delimiter)
-    {
-        std::ofstream file;
-        file.exceptions(std::ofstream::failbit | std::ofstream::badbit);
-        try {
-            file.open(filename, std::ios::trunc);
-            file << array2D[0].size();
-            for (auto &elem : array2D[0]) { file << delimiter << elem; }
-            for (size_t row = 1; row < array2D.size(); ++row) {
-                file << '\n' << array2D[row].size();
-                for (auto &elem : array2D[row]) { file << delimiter << elem; }
-            }
-            file.close();
-        } catch(std::ofstream::failure const&) {
-            error_handler::throw_error("file_access", filename);
-        }
-    }
 };
 
 namespace error_handler
@@ -201,6 +153,52 @@ namespace error_handler
         }
         std::cerr << "\nError" << msg << std::endl;
         exit(1);
+    }
+};
+
+namespace tools
+{
+    std::string remove_whitespace(std::string &str)
+    {
+        str.erase(remove_if(str.begin(), str.end(), ::isspace), str.end());
+        return str;
+    }
+
+    std::vector<int> string_to_vector_index(std::string &string_of_values, char delimiter)
+    {
+        std::vector<int> res;
+        std::string value;
+        std::stringstream ss(string_of_values);
+        while (getline(ss, value, delimiter)) {
+            res.push_back(std::stoi(tools::remove_whitespace(value))-1); }
+        return res;
+    }
+
+    template<typename T>
+    void print_array(std::vector<T> &array)
+    { for (size_t i = 0; i < array.size(); ++i) { std::cout << array[i] << '\t'; } }
+
+    template<typename T>
+    void print_array(std::vector<T> &array, size_t print_len)
+    { for (size_t i = 0; i < print_len; ++i) { std::cout << array[i] << '\t'; } }
+
+    template<typename T>
+    void export_array2D(std::vector<std::vector<T>> &array2D, std::string &&filename, char delimiter)
+    {
+        std::ofstream file;
+        file.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+        try {
+            file.open(filename, std::ios::trunc);
+            file << array2D[0].size();
+            for (auto &elem : array2D[0]) { file << delimiter << elem; }
+            for (size_t row = 1; row < array2D.size(); ++row) {
+                file << '\n' << array2D[row].size();
+                for (auto &elem : array2D[row]) { file << delimiter << elem; }
+            }
+            file.close();
+        } catch(std::ofstream::failure const&) {
+            error_handler::throw_error("file_access", filename);
+        }
     }
 };
 
@@ -260,21 +258,23 @@ public:
         infile_weights_format(input_param[1]),
         infile_weights_delim(input_param[2] == "tab" ? '\t' : "space" ? ' ' : input_param[3].c_str()[0]),
         weights_scale_factor_exc(stod(input_param[3])),
-        weights_scale_factor_inh(stod(input_param[3])),
+        weights_scale_factor_inh(stod(input_param[4])),
 
-        duration(stod(input_param[4])),
-        stepsize(stod(input_param[5])),
-        rng_seed(stod(input_param[6])),
+        duration(stod(input_param[5])),
+        stepsize(stod(input_param[6])),
+
         noise_intensity(stod(input_param[7])),
-        current_const(stod(input_param[8])),
+        rng_seed(stod(input_param[8])),
 
-        infile_stimulus(input_param[9]),
+        current_const(stod(input_param[9])),
 
-        init_potential(stod(input_param[10])),
-        init_adaptation(stod(input_param[11])),
+        infile_stimulus(input_param[10]),
 
-        trunc_time_inh(stod(input_param[12])),
-        trunc_time_exc(stod(input_param[13])),
+        init_potential(stod(input_param[11])),
+        init_adaptation(stod(input_param[12])),
+
+        trunc_time_inh(stod(input_param[13])),
+        trunc_time_exc(stod(input_param[14])),
 
         outfile_info(OUT_FNAME_INFO),
         outfile_sett(OUT_FNAME_SETTINGS),
@@ -286,6 +286,7 @@ public:
         outfile_conductance_exc_series(OUT_FNAME_CONDUCTANCE_EXC_SERIES),
         outfile_conductance_inh_series(OUT_FNAME_CONDUCTANCE_INH_SERIES),
         outfile_current_stoch_series(OUT_FNAME_CURRENT_STOCH_SERIES),
+
         outPotentialSeries((input_param[14] == "true") ? true : false),
         outAdaptationSeries((input_param[15] == "true") ? true : false),
         outCurrentSynapSeries((input_param[16] == "true") ? true : false),
@@ -651,9 +652,9 @@ void scale_synaptic_weights(Parameters &par, std::vector<std::vector<double>> &s
 {
     for (int i = 0; i < par.network_size; i++) {
         for (int j = 0; j < par.network_size; j++) {
-            if (synaptic_weights[i][j] > 1) {
+            if (synaptic_weights[i][j] > 0) {
                 synaptic_weights[i][j] *= par.weights_scale_factor_exc;
-            } else if (synaptic_weights[i][j] < 1) {
+            } else if (synaptic_weights[i][j] < 0) {
                 synaptic_weights[i][j] *= par.weights_scale_factor_inh;
     }}}
 }
@@ -803,8 +804,7 @@ int main(int argc, char **argv)
     const double sqrt_ddt = sqrt(dt/conductance_step_size);
 
     std::vector<float> potential_series_buf, adaptation_series_buf, current_synap_series_buf,
-                      conductance_exc_series_buf, conductance_inh_series_buf,
-                      current_stoch_series_buf;
+                      conductance_exc_series_buf, conductance_inh_series_buf, current_stoch_series_buf;
     std::ofstream file_potential_series, file_adaptation_series, file_current_synap_series,
         file_conductance_exc_series, file_conductance_inh_series, file_current_stoch_series;
     if (par.outPotentialSeries) {
