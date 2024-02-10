@@ -3,7 +3,7 @@ MyLib4
 ------
 Tools & templates
 
-Last update: 8 Feb, 2024 (pm)
+Last update: 10 Feb, 2024 (evening)
 """
 
 import os
@@ -733,6 +733,7 @@ qgraph.stix_style()
 # qgraph.serif_style()
 # qgraph.typewriter_style()
 qgraph.default_legend_style()
+qgraph.config_font("avenir")
 
 
 """gridspec_kw={"width_ratios":[.7,1]}"""
