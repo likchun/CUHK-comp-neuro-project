@@ -1,43 +1,42 @@
 [Caution: do not modify anything except the values after the equal signs]
 
 [Network and synaptic weights]
-synaptic weights matrix filename    = DIV66.txt
-matrix format (full/nonzero)#       = nonzero
-file delimiter (tab/space/...)      = space
-weights multiplying factor, beta*   = 2
+synaptic weights matrix file        = AdjMat.txt
+data format#                        = nonzero
+delimiter (space/tab/...)           = space
+exc weights scale factor            = 1
+inh weights scale factor            = 1
 
 [Numerical settings]
-simulation duration, T (ms)         = 5000
-time step size, dt (ms)             = 0.05
+simulation duration (ms)            = 5000
+time step size (ms)                 = 0.05
 
 [Stochastic current]
 random number generation seed       = 0
-white noise strength, alpha         = 3
+stochastic noise intensity          = 3
 
 [Constant current]
-constant driving current            = 0
+constant current amplitude          = 0
 
-[Stimulus]
-stimulus time series filename       = none
+[Stimulating current]
+stimulus time series file           = none
 
 [Initial values]
 membrane potential (mV)             = -70
-recovery variable                   = -14
+recovery variable or adaptation     = -14
 
 [Spike history truncation time]
-inhibitory neurons (ms)             = 600
-excitatory neurons (ms)             = 500
+for inhibitory neurons (ms)         = 600
+for excitatory neurons (ms)         = 500
 
 [Time series exportation]
 membrane potential (true/false)     = false
-recovery variable (true/false)      = false
-presynaptic current (true/false)    = false
-presynaptic EXC conductance         = false
-presynaptic INH conductance         = false
+recovery variable or adaptation     = false
+presynaptic current                 = false
+presynaptic exc conductance         = false
+presynaptic inh conductance         = false
 stochastic current                  = false
 
-
-*the synaptic weights are rescaled after finding in-degree and types of neurons
 
 #full:      the data file stores a full size NxN matrix
 #nonzero:   the data file stores only the nonzero elements with format (j i gji)

@@ -239,7 +239,9 @@ class NeuronalNetwork:
                         i+1, delimiter, self.adjacency_matrix[i][j]))
 
     def scale_synaptic_weights(self, scale:float, neuron_type="all"):
-        """Multiply all synaptic weights by a common factor: `scale`."""
+        """Multiply all synaptic weights by a common factor: `scale`.
+        Set `neuron_type` to `all`, `exc` or `inh` to scale all synaptic weights,
+        only excitatory weights or only inhibitory only"""
         if neuron_type == "all": self.adjacency_matrix *= scale
         elif neuron_type == "exc": self.adjacency_matrix[self.adjacency_matrix > 0] *= scale
         elif neuron_type == "inh": self.adjacency_matrix[self.adjacency_matrix < 0] *= scale
@@ -435,14 +437,18 @@ class NeuronalDynamics:
 
     class _time_series_handler:
 
-        def __init__(self, num_neuron:int,
-            potential_filepath="memp.bin", recovery_filepath="recv.bin",
-            conductance_exc_filepath="gcde.bin", conductance_inh_filepath="gcdi.bin",
-            synap_current_filepath="isyn.bin", stoch_current_filepath="stoc.bin"):
+        def __init__(self, num_neuron:int, directory:str, potential:str, adaptation:str,
+                     conductance_exc:str, conductance_inh:str, synap_current:str, stoch_current:str):
+            potential_filepath = os.path.join(directory,potential)
+            adaptation_filepath = os.path.join(directory,adaptation)
+            conductance_exc_filepath = os.path.join(directory,conductance_exc)
+            conductance_inh_filepath = os.path.join(directory,conductance_inh)
+            synap_current_filepath = os.path.join(directory,synap_current)
+            stoch_current_filepath = os.path.join(directory,stoch_current)
             self._num_neuron = num_neuron
             self._num_trim_step = 0
             self._v_filepath = potential_filepath
-            self._u_filepath = recovery_filepath
+            self._u_filepath = adaptation_filepath
             self._synapi_filepath = synap_current_filepath
             self._ge_filepath = conductance_exc_filepath
             self._gi_filepath = conductance_inh_filepath
@@ -481,12 +487,11 @@ class NeuronalDynamics:
         def set_trim_transient_duration(self, transient_beg_t_ms:float, stepsize_ms:float):
             self._num_trim_step = int(transient_beg_t_ms/stepsize_ms)
 
-    def time_series_data_from_file(self, num_neuron:int,
-            potential_filepath="memp.bin", recovery_filepath="recv.bin",
-            conductance_exc_filepath="gcde.bin", conductance_inh_filepath="gcdi.bin",
-            synap_current_filepath="curr.bin", stoch_current_filepath="stoc.bin"):
-        self.time_series = self._time_series_handler(num_neuron, potential_filepath, recovery_filepath,
-            conductance_exc_filepath, conductance_inh_filepath, synap_current_filepath, stoch_current_filepath)
+    def time_series_data_from_file(self, num_neuron:int, directory:str,
+            potential="memp.bin", adaptation="recv.bin", conductance_exc="gcde.bin",
+            conductance_inh="gcdi.bin", synap_current="curr.bin", stoch_current="stoc.bin"):
+        self.time_series = self._time_series_handler(num_neuron, directory, potential, adaptation,
+            conductance_exc, conductance_inh, synap_current, stoch_current)
 
 
 class QuickGraph:
@@ -624,57 +629,73 @@ class NeuroData:
         self.directory = directory
         self.configs = yaml.safe_load(open(os.path.join(directory,"sett.json"),'r'))
         """
-        All configs:
-        - `network_file`: str
-        - `stimulus_file`: str
-        - `noiselv`: float
-        - `rng_seed`: float
+        Numerical settings:
         - `num_neuron`: int
         - `stepsize_ms`: float
         - `sampfreq_Hz`: float
         - `duration_ms`: float
         - `num_step`: int
+
+        Inputs to neurons:
+        - `noise_intensity`: float
+        - `rng_seed`: float
         - `const_current`: float
-        - `weightscale_factor`: float
+        - `stimulus_file`: str
+
+        Network:
+        - `network_file`: str
+        - `weightscale_factor_exc`: float
+        - `weightscale_factor_inh`: float
+
+        Other settings:
+        - `init_potential`: float
+        - `init_recovery` or `init_adaptation`: float
         - `exp_trunc_step_exc`: int
         - `exp_trunc_step_inh`: int
-        - `init_potential`: float
-        - `init_recovery`: float
         - `data_series_export`: dict
-            - `current`: bool
             - `potential`: bool
-            - `recovery`: bool
+            - `recovery` or `adaptation`: bool 
+            - `current_synap`: bool
+            - `conductance_exc`: bool
+            - `conductance_inh`: bool
+            - `current_stoch`: bool
         """
-        ### compatibility ###
-        try: self.configs["stepsize_ms"]
-        except KeyError: self.configs["stepsize_ms"] = self.configs["dt_ms"]
-        try: self.configs["num_neuron"]
-        except KeyError: self.configs["num_neuron"] = self.configs["neuron_num"]
-        try: self.configs["weightscale_factor"]
-        except KeyError: self.configs["weightscale_factor"] = self.configs["beta"]
-        try: self.configs["noiselv"]
-        except KeyError: self.configs["noiselv"] = self.configs["alpha"]
-
-        if type(self.configs["duration_ms"])==str: self.configs["duration_ms"] = float(self.configs["duration_ms"])
-        if type(self.configs["stepsize_ms"])==str: self.configs["stepsize_ms"] = float(self.configs["stepsize_ms"])
-        self.configs["sampfreq_Hz"] = 1000/self.configs["stepsize_ms"]
-        self.configs["num_step"] = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
-        yaml.dump(self.configs, open(os.path.join(directory, "sett.yml"), 'w'), default_flow_style=False)
-
+        self._compatibility()
         self.network = NeuronalNetwork()
         self._netFound = False
         try: self.network.adjacency_matrix_from_file(self.configs["network_file"]); self._netFound = True
         except FileNotFoundError:
             try: self.network.adjacency_matrix_from_file(os.path.join(directory,self.configs["network_file"])); self._netFound = True
-            except FileNotFoundError: print("Warning: network file not found. \"network\" functions cannot be used.")
-        if self._netFound: self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor"], neuron_type="all")
+            except FileNotFoundError: print("Warning: network file not found. \"network\" functions cannot be used. Note: to access the network file, put it into the same the directory as this script.")
+        if self._netFound:
+            self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor_exc"], neuron_type="exc")
+            self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor_inh"], neuron_type="inh")
         else: del self.network
 
         self.dynamics = NeuronalDynamics(os.path.join(directory),self.configs["stepsize_ms"],self.configs["duration_ms"])
-        self.dynamics.time_series_data_from_file(self.configs["num_neuron"],
-            os.path.join(directory,"memp.bin"),os.path.join(directory,"recv.bin"),
-            os.path.join(directory,"gcde.bin"),os.path.join(directory,"gcdi.bin"),
-            os.path.join(directory,"isyn.bin"),os.path.join(directory,"stoc.bin"))
+        try: self.configs["data_series_export"]["recovery"]; _ufile = "recv.bin"
+        except KeyError: self.configs["data_series_export"]["adaptation"]; _ufile = "adap.bin"
+        self.dynamics.time_series_data_from_file(self.configs["num_neuron"],self.directory,"memp.bin",_ufile,"gcde.bin","gcdi.bin","isyn.bin","istc.bin")
+
+    def _compatibility(self):
+        ### compatibility ###
+        try: self.configs["stepsize_ms"]
+        except KeyError: self.configs["stepsize_ms"] = self.configs["dt_ms"]
+        try: self.configs["num_neuron"]
+        except KeyError: self.configs["num_neuron"] = self.configs["neuron_num"]
+        try: self.configs["weightscale_factor_exc"]
+        except KeyError:
+            try: self.configs["weightscale_factor_exc"],self.configs["weightscale_factor_inh"] = self.configs["weightscale_factor"], self.configs["weightscale_factor"]
+            except KeyError: self.configs["weightscale_factor_exc"],self.configs["weightscale_factor_inh"] = self.configs["beta"], self.configs["beta"]
+        try: self.configs["noise_intensity"]
+        except KeyError:
+            try: self.configs["noise_intensity"] = self.configs["noiselv"]
+            except KeyError: self.configs["noise_intensity"] = self.configs["alpha"]
+        if type(self.configs["duration_ms"])==str: self.configs["duration_ms"] = float(self.configs["duration_ms"])
+        if type(self.configs["stepsize_ms"])==str: self.configs["stepsize_ms"] = float(self.configs["stepsize_ms"])
+        self.configs["sampfreq_Hz"] = 1000/self.configs["stepsize_ms"]
+        self.configs["num_step"] = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
+        yaml.dump(self.configs, open(os.path.join(self.directory, "sett.yml"), 'w'), default_flow_style=False)
 
     def trim_transient_dynamics(self, transient_beg_t_ms:float):
         self.dynamics._reset_all()
