@@ -12,7 +12,7 @@
  * 
  */
 
-double adaptation_jump_multiplying_factor = 20; // change the parameter d, (new value) = (original value)*(adaptation_jump_multiplying_factor)
+double adaptation_jump_multiplying_factor = 6; // change the parameter d, (new value) = (original value)*(adaptation_jump_multiplying_factor)
 
 
 #include "boost/random.hpp"

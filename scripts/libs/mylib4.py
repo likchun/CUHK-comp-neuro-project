@@ -695,7 +695,7 @@ class NeuroData:
             self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(self.neuron_mask),np.array(self.neuron_mask))]
 
     def retain_neurons(self, retain_index:list):
-        """`remove_index`: a list of indices of neurons to be retained, other neurons are removed"""
+        """`retain_index`: a list of indices of neurons to be retained, other neurons are removed"""
         self.neuron_mask = np.full(self.configs["num_neuron"], False)
         self.neuron_mask[retain_index] = True
         self.configs["num_neuron"] = len(retain_index)

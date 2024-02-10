@@ -7,7 +7,7 @@
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
  * 
  * Compile command:
- * (MacOS) clang++ "./NetworkDynamics_[const_adaptation].cpp" -std=c++17 -O3 -o "./NetworkDynamics_[const_adaptation].o" -I"/Users/likchun/Libraries/c++/boost_1_78_0"
+ * (MacOS) clang++ "./NetworkDynamics_[0a0d].cpp" -std=c++17 -O3 -o "./NetworkDynamics_[0a0d].o" -I"/Users/likchun/Libraries/c++/boost_1_78_0"
  * (CUHKPHYcluster) icpc src/NetworkDynamics.cpp -std=c++14 -O3 -o build/NetworkDynamics.o -I/home/user/lcchan/lib/boost_1_78_0 -no-multibyte-chars
  * 
  */
