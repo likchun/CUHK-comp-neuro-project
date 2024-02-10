@@ -1,21 +1,20 @@
 /**
  * @file IZH_Gsyn.cpp
  * @author likchun@outlook.com
- * @brief numerically simulate the dynamics of a network of spiking neurons with Izhikevich's model and conductance-based synapse model
- * @version 5.1
- * @date 2023-11-17
+ * @brief numerically simulate the dynamics of a network of spiking neurons
+ *        modelled by Izhikevich's model and connected by conductance-based synapses
+ * @version 6
+ * @date 2024-Feb-10
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
  * 
  * Compile command:
  * (MacOS) clang++ ./IZH_Gsyn.cpp -std=c++17 -O3 -o ./IZH_Gsyn.o -I"/Users/likchun/Libraries/c++/boost_1_78_0"
- * (CUHKPHYcluster) icpc src/IZH_Gsyn.cpp -std=c++14 -O3 -o build/IZH_Gsyn.o -I/home/user/lcchan/lib/boost_1_78_0 -no-multibyte-chars
  * 
  */
 
 
 #include "boost/random.hpp"
 #include <fstream>
-#include <iomanip> // Required for complining the code in CUHK cluster1
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -26,47 +25,76 @@
 #endif
 
 
+std::string code_ver = "Version 6\nLast Update: 10 Feburary 2024\n";
+std::string prog_info = "This program simulates the dynamics of a network\nof spiking neurons modelled by Izhikevich's model\nand connected by conductance-based synapse model\n";
+
+namespace model_param
+{
+    namespace Izh
+    {
+        constexpr const double V_s = 30; // spike potentil threshold, mV
+
+        namespace exc {
+            constexpr const double a = 0.02; // reciprocal of recovery variable decay time constant
+            constexpr const double b = 0.2; // recovery variable coupling parameter
+            constexpr const double c = -65.0; // spike-triggered reset potential
+            constexpr const double d = 8.0; // spike-triggered recovery variable increment
+        }
+        namespace inh {
+            constexpr const double a = 0.1; // reciprocal of recovery variable decay time constant
+            constexpr const double b = 0.2; // recovery variable coupling parameter
+            constexpr const double c = -65.0; // spike-triggered reset potential
+            constexpr const double d = 2.0; // spike-triggered recovery variable increment
+        }
+    }
+
+    namespace Gsynap
+    {
+        const double V_E = 0; // reversal_potential of the EXC synapses, mV
+        const double tau_GE = 5; // conductance decay time constant of the EXC synapses, ms
+        const double V_I = -80; // reversal_potential of the INH synapses, mV
+        const double tau_GI = 6; // conductance decay time constant of the INH synapses, ms
+    }
+}
+
+
 #define _CRT_SECURE_NO_WARNINGS
 #define NO_MAIN_ARGUMENT                  argc == 1
 
 /* I-O files & directories */
-#define INPUT_FILENAME_PARAMETERS         "vars.txt"
-#define OUTPUT_FOLDER                     "output"
+#define IN_FNAME_PARAMETERS                "vars.txt"
+#define OUT_FOLDER                         "output"
 #ifdef _WIN32 // For Windows
-#define OUTPUT_FILENAME_INFO                     "output\\info.txt"
-#define OUTPUT_FILENAME_SETTINGS                 "output\\sett.json"
-#define OUTPUT_FILENAME_CONTINUATION             "output\\cont.dat"
-#define OUTPUT_FILENAME_SPIKE_TIMESTEP           "output\\spks.txt"
-#define OUTPUT_FILENAME_SPIKE_TIME               "output\\spkt.txt"
-#define OUTPUT_FILENAME_POTENTIAL_SERIES         "output\\memp.bin"
-#define OUTPUT_FILENAME_RECOVERY_SERIES          "output\\recv.bin"
-#define OUTPUT_FILENAME_CURRENT_SYNAP_SERIES     "output\\isyn.bin"
-#define OUTPUT_FILENAME_CONDUCTANCE_EXC_SERIES   "output\\gcde.bin"
-#define OUTPUT_FILENAME_CONDUCTANCE_INH_SERIES   "output\\gcdi.bin"
-#define OUTPUT_FILENAME_CURRENT_STOCH_SERIES     "output\\istc.bin"
+#define OUT_FNAME_INFO                     "output\\info.txt"
+#define OUT_FNAME_SETTINGS                 "output\\sett.json"
+#define OUT_FNAME_CONTINUATION             "output\\cont.dat"
+#define OUT_FNAME_SPIKE_TIMESTEP           "output\\spks.txt"
+#define OUT_FNAME_SPIKE_TIME               "output\\spkt.txt"
+#define OUT_FNAME_POTENTIAL_SERIES         "output\\memp.bin"
+#define OUT_FNAME_RECOVERY_SERIES          "output\\recv.bin"
+#define OUT_FNAME_CURRENT_SYNAP_SERIES     "output\\isyn.bin"
+#define OUT_FNAME_CONDUCTANCE_EXC_SERIES   "output\\gcde.bin"
+#define OUT_FNAME_CONDUCTANCE_INH_SERIES   "output\\gcdi.bin"
+#define OUT_FNAME_CURRENT_STOCH_SERIES     "output\\istc.bin"
 #define CREATE_OUTPUT_DIRECTORY(__DIR)    if (CreateDirectoryA(__DIR, NULL) || ERROR_ALREADY_EXISTS == GetLastError()) {}\
                                          else { error_handler::throw_error("dir_create", __DIR); }
 #elif __APPLE__ || __linux__ // For Mac & Linux
 struct stat st = {0};
-#define OUTPUT_FILENAME_INFO                     "output/info.txt"
-#define OUTPUT_FILENAME_SETTINGS                 "output/sett.json"
-#define OUTPUT_FILENAME_CONTINUATION             "output/cont.dat"
-#define OUTPUT_FILENAME_SPIKE_TIMESTEP           "output/spks.txt"
-#define OUTPUT_FILENAME_SPIKE_TIME               "output/spkt.txt"
-#define OUTPUT_FILENAME_POTENTIAL_SERIES         "output/memp.bin"
-#define OUTPUT_FILENAME_RECOVERY_SERIES          "output/recv.bin"
-#define OUTPUT_FILENAME_CURRENT_SYNAP_SERIES     "output/isyn.bin"
-#define OUTPUT_FILENAME_CONDUCTANCE_EXC_SERIES   "output/gcde.bin"
-#define OUTPUT_FILENAME_CONDUCTANCE_INH_SERIES   "output/gcdi.bin"
-#define OUTPUT_FILENAME_CURRENT_STOCH_SERIES     "output/istc.bin"
+#define OUT_FNAME_INFO                     "output/info.txt"
+#define OUT_FNAME_SETTINGS                 "output/sett.json"
+#define OUT_FNAME_CONTINUATION             "output/cont.dat"
+#define OUT_FNAME_SPIKE_TIMESTEP           "output/spks.txt"
+#define OUT_FNAME_SPIKE_TIME               "output/spkt.txt"
+#define OUT_FNAME_POTENTIAL_SERIES         "output/memp.bin"
+#define OUT_FNAME_RECOVERY_SERIES          "output/recv.bin"
+#define OUT_FNAME_CURRENT_SYNAP_SERIES     "output/isyn.bin"
+#define OUT_FNAME_CONDUCTANCE_EXC_SERIES   "output/gcde.bin"
+#define OUT_FNAME_CONDUCTANCE_INH_SERIES   "output/gcdi.bin"
+#define OUT_FNAME_CURRENT_STOCH_SERIES     "output/istc.bin"
 #define CREATE_OUTPUT_DIRECTORY(__DIR)    if (stat(__DIR, &st) == -1) { mkdir(__DIR, 0700); }
 #endif
 
-
-std::string code_ver = "Version 5.1\nLast Update: 17 November 2023\n";
-std::string prog_info = "This program simulates the dynamics of a\nnetwork of spiking neurons with Izhikevich's\nmodel and conductance-based synapse model\n";
-
-#define TIMESERIES_BUFFSIZE_THRESHOLD 150000000
+#define TIMESERIES_BUFFSIZE_THRESH 150000000
 
 namespace datatype_precision
 {
@@ -173,34 +201,6 @@ namespace tools
     }
 };
 
-namespace model_param
-{
-    namespace Izh
-    {
-        constexpr const double V_s = 30; // spike potentil threshold, mV
-
-        namespace RS {
-            constexpr const double a = 0.02; // reciprocal of recovery variable time constant
-            constexpr const double b = 0.2; // recovery variable coupling parameter
-            constexpr const double c = -65.0; // spike-triggered reset potential
-            constexpr const double d = 8.0; // spike-triggered recovery variable increment
-        }
-        namespace FS {
-            constexpr const double a = 0.1; // reciprocal of recovery variable time constant
-            constexpr const double b = 0.2; // recovery variable coupling parameter
-            constexpr const double c = -65.0; // spike-triggered reset potential
-            constexpr const double d = 2.0; // spike-triggered recovery variable increment
-        }
-    }
-
-    namespace Gsynap {
-        const double V_E = 0; // reversal_potential of the EXC synapse, mV
-        const double tau_GE = 5; // adaptation decay time constant, ms
-        const double V_I = -80; // reversal_potential of the INH synapse, mV
-        const double tau_GI = 6; // adaptation decay time constant, ms
-    }
-}
-
 
 /* Get all parameters and settings from "vars.txt" */
 class Parameters
@@ -216,12 +216,15 @@ public:
     const std::string infile_weights;
     const std::string infile_weights_format;
     const char        infile_weights_delim;
-    const double      weights_scale_factor;
+    const double      weights_scale_factor_exc;
+    const double      weights_scale_factor_inh;
 
     const double duration;
-    const double dt;
-    const double rng_seed;
+    const double stepsize;
+
     const double noise_intensity;
+    const double rng_seed;
+
     const double current_const;
 
     const std::string infile_stimulus;
@@ -242,6 +245,7 @@ public:
     const std::string outfile_conductance_exc_series;
     const std::string outfile_conductance_inh_series;
     const std::string outfile_current_stoch_series;
+
     const bool        outPotentialSeries;
     const bool        outRecoverySeries;
     const bool        outCurrentSynapSeries;
@@ -255,38 +259,42 @@ public:
         infile_weights(input_param[0]),
         infile_weights_format(input_param[1]),
         infile_weights_delim(input_param[2] == "tab" ? '\t' : "space" ? ' ' : input_param[3].c_str()[0]),
-        weights_scale_factor(stod(input_param[3])),
+        weights_scale_factor_exc(stod(input_param[3])),
+        weights_scale_factor_inh(stod(input_param[4])),
 
-        duration(stod(input_param[4])),
-        dt(stod(input_param[5])),
-        rng_seed(stod(input_param[6])),
+        duration(stod(input_param[5])),
+        stepsize(stod(input_param[6])),
+
         noise_intensity(stod(input_param[7])),
-        current_const(stod(input_param[8])),
+        rng_seed(stod(input_param[8])),
 
-        infile_stimulus(input_param[9]),
+        current_const(stod(input_param[9])),
 
-        init_potential(stod(input_param[10])),
-        init_recovery(stod(input_param[11])),
+        infile_stimulus(input_param[10]),
 
-        trunc_time_inh(stod(input_param[12])),
-        trunc_time_exc(stod(input_param[13])),
+        init_potential(stod(input_param[11])),
+        init_recovery(stod(input_param[12])),
 
-        outfile_info(OUTPUT_FILENAME_INFO),
-        outfile_sett(OUTPUT_FILENAME_SETTINGS),
-        outfile_cont(OUTPUT_FILENAME_CONTINUATION),
-        outfile_spike_timestep(OUTPUT_FILENAME_SPIKE_TIMESTEP),
-        outfile_potential_series(OUTPUT_FILENAME_POTENTIAL_SERIES),
-        outfile_recovery_series(OUTPUT_FILENAME_RECOVERY_SERIES),
-        outfile_current_synap_series(OUTPUT_FILENAME_CURRENT_SYNAP_SERIES),
-        outfile_conductance_exc_series(OUTPUT_FILENAME_CONDUCTANCE_EXC_SERIES),
-        outfile_conductance_inh_series(OUTPUT_FILENAME_CONDUCTANCE_INH_SERIES),
-        outfile_current_stoch_series(OUTPUT_FILENAME_CURRENT_STOCH_SERIES),
-        outPotentialSeries((input_param[14] == "true") ? true : false),
-        outRecoverySeries((input_param[15] == "true") ? true : false),
-        outCurrentSynapSeries((input_param[16] == "true") ? true : false),
-        outConductanceEXCSeries((input_param[17] == "true") ? true : false),
-        outConductanceINHSeries((input_param[18] == "true") ? true : false),
-        outCurrentStochSeries((input_param[19] == "true") ? true : false)
+        trunc_time_inh(stod(input_param[13])),
+        trunc_time_exc(stod(input_param[14])),
+
+        outfile_info(OUT_FNAME_INFO),
+        outfile_sett(OUT_FNAME_SETTINGS),
+        outfile_cont(OUT_FNAME_CONTINUATION),
+        outfile_spike_timestep(OUT_FNAME_SPIKE_TIMESTEP),
+        outfile_potential_series(OUT_FNAME_POTENTIAL_SERIES),
+        outfile_recovery_series(OUT_FNAME_RECOVERY_SERIES),
+        outfile_current_synap_series(OUT_FNAME_CURRENT_SYNAP_SERIES),
+        outfile_conductance_exc_series(OUT_FNAME_CONDUCTANCE_EXC_SERIES),
+        outfile_conductance_inh_series(OUT_FNAME_CONDUCTANCE_INH_SERIES),
+        outfile_current_stoch_series(OUT_FNAME_CURRENT_STOCH_SERIES),
+
+        outPotentialSeries((input_param[15] == "true") ? true : false),
+        outRecoverySeries((input_param[16] == "true") ? true : false),
+        outCurrentSynapSeries((input_param[17] == "true") ? true : false),
+        outConductanceEXCSeries((input_param[18] == "true") ? true : false),
+        outConductanceINHSeries((input_param[19] == "true") ? true : false),
+        outCurrentStochSeries((input_param[20] == "true") ? true : false)
 
     { if (!suppressConsoleMsg) { std::cout << "OKAY, parameters imported from \"" << filename << "\"\n"; }}
 
@@ -399,8 +407,8 @@ namespace fileio
                     stimulus_series.push_back(std::stod(tools::remove_whitespace(datum)));
             }}
             ifs.close();
-            if (stimulus_series.size()!=static_cast<int>(par.duration/par.dt)) {
-                error_handler::throw_error("stimu_input", std::vector<int>({(int)(stimulus_series.size()), (int)(par.duration/par.dt)}));
+            if (stimulus_series.size()!=static_cast<int>(par.duration/par.stepsize)) {
+                error_handler::throw_error("stimu_input", std::vector<int>({(int)(stimulus_series.size()), (int)(par.duration/par.stepsize)}));
             }
         } else {
             error_handler::throw_error("file_access", par.infile_stimulus);
@@ -420,27 +428,28 @@ namespace fileio
             try {
                 ofs.open(par.outfile_info, std::ios::trunc);
                 ofs << code_ver << '\n'
-                    << "--------------------------------------------------\n"
+                    << "------------------------------------------------------------\n"
                     << "computation finished at: " << datetime_buf << '\n'
                     << "time elapsed: " << time_elapsed << " s\n\n"
-                    << "[Network and synaptic weights]" << '\n'
+                    << "[network and synaptic weights]" << '\n'
                     << "network file:\t\t\t" << par.infile_weights << '\n'
-                    << "number of neurons (N):\t\t" << par.network_size << '\n'
-                    << "scale factor (beta):\t\t" << par.weights_scale_factor << "\n\n"
-                    << "[Simulation settings]" << '\n'
-                    << "step size (dt):\t\t\t" << par.dt << " ms" << '\n'
-                    << "duration (T):\t\t\t" << par.duration << " ms" << "\n\n"
-                    << "[Inputs to neurons]" << '\n'
+                    << "number of neurons:\t\t" << par.network_size << '\n'
+                    << "exc weight scale factor:\t" << par.weights_scale_factor_exc << "\n\n"
+                    << "inh weight scale factor:\t" << par.weights_scale_factor_inh << "\n\n"
+                    << "[numerical settings]" << '\n'
+                    << "time step size:\t\t\t" << par.stepsize << " ms" << '\n'
+                    << "duration:\t\t\t" << par.duration << " ms" << "\n\n"
+                    << "[inputs to neurons]" << '\n'
                     << "random number seed:\t\t" << par.rng_seed << '\n'
-                    << "noise intensity (alpha):\t" << par.noise_intensity << '\n'
+                    << "noise intensity:\t\t" << par.noise_intensity << '\n'
                     << "constant current:\t\t" << par.current_const << '\n'
                     << "stimulus file:\t\t\t" << par.infile_stimulus << "\n\n"
-                    << "[Initial values]\n"
+                    << "[initial values]\n"
                     << "membrane potential:\t\t" << par.init_potential << " mV" << '\n'
                     << "recovery variable:\t\t" << par.init_recovery << "\n\n"
-                    << "[Other settings]" << '\n'
-                    << "spike truncation time:\t\t" << trunc_step_inh*par.dt << " ms" << " (inh)\n"
-                    << "spike truncation time:\t\t" << trunc_step_exc*par.dt << " ms" << " (exc)\n"
+                    << "[other settings]" << '\n'
+                    << "spike truncation time:\t\t" << trunc_step_inh*par.stepsize << " ms" << " (inh)\n"
+                    << "spike truncation time:\t\t" << trunc_step_exc*par.stepsize << " ms" << " (exc)\n"
                     << std::endl;
                 ofs.close();
             } catch(std::ifstream::failure const&) {
@@ -451,10 +460,10 @@ namespace fileio
             ofs.exceptions(std::ofstream::failbit | std::ofstream::badbit);
             try {
                 ofs.open(par.outfile_info, std::ios::app);
-                ofs << "--------------------------------------------------\n"
+                ofs << "------------------------------------------------------------\n"
                     << "computation finished at: " << datetime_buf
                     << "time elapsed: " << time_elapsed << " s\n\n"
-                    << "extend duration (T) to:\t\t" << par.duration << " ms\n\n";
+                    << "extend duration to:\t\t" << par.duration << " ms\n\n";
                 ofs.close();
             } catch(std::ifstream::failure const&) {
                 error_handler::throw_error("file_access", par.outfile_info);
@@ -472,10 +481,11 @@ namespace fileio
                 << "\"network_file\": " << "\"" << par.infile_weights << "\"" << ", "
                 << "\"stimulus_file\": " << "\"" << par.infile_stimulus << "\"" << ", "
                 << "\"num_neuron\": " << par.network_size << ", "
-                << "\"weightscale_factor\": " << par.weights_scale_factor << ", "
-                << "\"stepsize_ms\": " << par.dt << ", "
+                << "\"weightscale_factor_exc\": " << par.weights_scale_factor_exc << ", "
+                << "\"weightscale_factor_inh\": " << par.weights_scale_factor_inh << ", "
+                << "\"stepsize_ms\": " << par.stepsize << ", "
                 << "\"duration_ms\": " << par.duration << ", "
-                << "\"noiselv\": " << par.noise_intensity << ", "
+                << "\"noise_intensity\": " << par.noise_intensity << ", "
                 << "\"rng_seed\": " << par.rng_seed << ", "
                 << "\"const_current\": " << par.current_const << ", "
                 << "\"exp_trunc_step_inh\": " << trunc_step_inh << ", "
@@ -487,8 +497,8 @@ namespace fileio
                     << "\"potential\": " << (par.outPotentialSeries ? "true" : "false") << ", "
                     << "\"recovery\": " << (par.outRecoverySeries ? "true" : "false") << ", "
                     << "\"current_synap\": " << (par.outCurrentSynapSeries ? "true" : "false") << ", "
-                    << "\"conductanceEXC\": " << (par.outConductanceEXCSeries ? "true" : "false") << ", "
-                    << "\"conductanceINH\": " << (par.outConductanceINHSeries ? "true" : "false") << ", "
+                    << "\"conductance_exc\": " << (par.outConductanceEXCSeries ? "true" : "false") << ", "
+                    << "\"conductance_inh\": " << (par.outConductanceINHSeries ? "true" : "false") << ", "
                     << "\"current_stoch\": " << (par.outCurrentSynapSeries ? "true" : "false")
                     << "}"
                 << "}" << std::endl;
@@ -512,17 +522,17 @@ namespace fileio
             ofs << ++continuation << '|' << par.outPotentialSeries << '|'
                 << par.outRecoverySeries << '|' << par.outCurrentSynapSeries << '\n';
             ofs << par.network_size << '|'
-                << par.dt << '|' << par.duration << '|'
+                << par.stepsize << '|' << par.duration << '|'
                 << par.rng_seed << '|'
                 << par.noise_intensity << '|'
                 << trunc_step_inh << '|' << trunc_step_exc << '|'
-                << par.weights_scale_factor << '|';
+                << par.weights_scale_factor_exc << '|' << par.weights_scale_factor_inh << '|';
             ofs << '|';
             ofs << par.init_potential << '|' << par.init_recovery << '|'
-                << model_param::Izh::RS::a << '|' << model_param::Izh::RS::b << '|'
-                << model_param::Izh::RS::c << '|' << model_param::Izh::RS::d << '|'
-                << model_param::Izh::FS::a << '|' << model_param::Izh::FS::b << '|'
-                << model_param::Izh::FS::c << '|' << model_param::Izh::FS::d << '|'
+                << model_param::Izh::exc::a << '|' << model_param::Izh::exc::b << '|'
+                << model_param::Izh::exc::c << '|' << model_param::Izh::exc::d << '|'
+                << model_param::Izh::inh::a << '|' << model_param::Izh::inh::b << '|'
+                << model_param::Izh::inh::c << '|' << model_param::Izh::inh::d << '|'
                 << model_param::Izh::V_s << '|'
                 << model_param::Gsynap::tau_GE << '|' << model_param::Gsynap::tau_GI << '|'
                 << model_param::Gsynap::V_E << '|' << model_param::Gsynap::V_I << '|';
@@ -575,19 +585,20 @@ void display_info(Parameters &par)
     std::cout << "---------------------------------------------\n"
               << "|synaptic weights file:   " << par.infile_weights << '\n'
               << "|number of neurons:       " << par.network_size << '\n'
-              << "|scaling factor, beta:    " << par.weights_scale_factor << '\n'
-              << "|simulation duration, T:  " << par.duration << " ms" << '\n'
-              << "|time step size, dt:      " << par.dt << " ms" << '\n'
+              << "|exc weight scale factor: " << par.weights_scale_factor_exc << '\n'
+              << "|inh weight scale factor: " << par.weights_scale_factor_inh << '\n'
+              << "|duration:                " << par.duration << " ms" << '\n'
+              << "|time step size:          " << par.stepsize << " ms" << '\n'
               << "|stochastic current:\n"
-              << "|>noise intensity, alpha: " << par.noise_intensity << '\n'
+              << "|>noise intensity:        " << par.noise_intensity << '\n'
               << "|>random number seed:     " << par.rng_seed << '\n'
               << "|constant current:\n"
               << "|>amplitude:              " << par.current_const << '\n'
-              << "|stimulus:                " << ((par.infile_stimulus=="none") ? "no" : "yes") << '\n';
-    if (par.infile_stimulus!="none") { std::cout << "|>input file name:        " << par.infile_stimulus << '\n'; }
+              << "|externally stimulated?   " << ((par.infile_stimulus=="none") ? "no" : "yes") << '\n';
+    if (par.infile_stimulus!="none") { std::cout << "|>stimulus file:          " << par.infile_stimulus << '\n'; }
     std::cout << "|spike truncation time:\n"
-              << "|>excitatory neurons:     " << par.trunc_time_exc << " ms" << '\n'
-              << "|>inhibitory neurons:     " << par.trunc_time_inh << " ms" << '\n';
+              << "|>exc neurons:            " << par.trunc_time_exc << " ms" << '\n'
+              << "|>inh neurons:            " << par.trunc_time_inh << " ms" << '\n';
     std::cout << "---------------------------------------------" << std::endl;
 }
 
@@ -641,9 +652,11 @@ void scale_synaptic_weights(Parameters &par, std::vector<std::vector<double>> &s
 {
     for (int i = 0; i < par.network_size; i++) {
         for (int j = 0; j < par.network_size; j++) {
-            synaptic_weights[i][j] *= par.weights_scale_factor;
-        }
-    }
+            if (synaptic_weights[i][j] > 0) {
+                synaptic_weights[i][j] *= par.weights_scale_factor_exc;
+            } else if (synaptic_weights[i][j] < 0) {
+                synaptic_weights[i][j] *= par.weights_scale_factor_inh;
+    }}}
 }
 
 /* Create reference "inhibitory(excitatory)_links_index" which stores
@@ -683,19 +696,19 @@ void setup_truncation_step(Parameters &par, std::vector<std::vector<double>> &sy
     }
     if (par.trunc_time_inh == -1) {
         trunc_step_inh = model_param::Gsynap::tau_GI * log(
-            datatype_precision::PRECISION_DOUBLE * par.weights_scale_factor * w_inh_max
-        ) / par.dt;
-        if (w_inh_max == 0 || par.weights_scale_factor == 0) { trunc_step_inh = 0; }
+            datatype_precision::PRECISION_DOUBLE * par.weights_scale_factor_inh * w_inh_max
+        ) / par.stepsize;
+        if (w_inh_max == 0 || par.weights_scale_factor_inh == 0) { trunc_step_inh = 0; }
     } else {
-        trunc_step_inh = (par.trunc_time_inh / par.dt);
+        trunc_step_inh = (par.trunc_time_inh / par.stepsize);
     }
     if (par.trunc_time_exc == -1) {
         trunc_step_exc = model_param::Gsynap::tau_GE * log(
-            datatype_precision::PRECISION_DOUBLE * par.weights_scale_factor * w_exc_max
-        ) / par.dt;
-        if (w_exc_max == 0 || par.weights_scale_factor == 0) { trunc_step_exc = 0; }
+            datatype_precision::PRECISION_DOUBLE * par.weights_scale_factor_exc * w_exc_max
+        ) / par.stepsize;
+        if (w_exc_max == 0 || par.weights_scale_factor_exc == 0) { trunc_step_exc = 0; }
     } else {
-        trunc_step_exc = (par.trunc_time_exc / par.dt);
+        trunc_step_exc = (par.trunc_time_exc / par.stepsize);
     }
 }
 
@@ -707,11 +720,11 @@ void setup_exp_lookup_table(Parameters &par, std::vector<double> &spike_exp_inh,
 {
     spike_exp_inh = std::vector<double>(trunc_step_inh);
     for (int i = 0; i < static_cast<int>(spike_exp_inh.size()); ++i) {
-        spike_exp_inh[i] = exp(-i * par.dt / model_param::Gsynap::tau_GI);
+        spike_exp_inh[i] = exp(-i * par.stepsize / model_param::Gsynap::tau_GI);
     }
     spike_exp_exc = std::vector<double>(trunc_step_exc);
     for (int i = 0; i < static_cast<int>(spike_exp_exc.size()); ++i) {
-        spike_exp_exc[i] = exp(-i * par.dt / model_param::Gsynap::tau_GE);
+        spike_exp_exc[i] = exp(-i * par.stepsize / model_param::Gsynap::tau_GE);
     }
 }
 
@@ -731,9 +744,9 @@ int main(int argc, char **argv)
     int mode = 0;           // 0: overwrite mode | 1: continue mode (not implemented)
     int continuation = -1;  // count the number of times of continuation (not implemented)
 
-    Parameters par(INPUT_FILENAME_PARAMETERS, suppressConsoleMsg);
+    Parameters par(IN_FNAME_PARAMETERS, suppressConsoleMsg);
 
-    CREATE_OUTPUT_DIRECTORY(OUTPUT_FOLDER)
+    CREATE_OUTPUT_DIRECTORY(OUT_FOLDER)
 
     std::vector<int> neuron_type;
     std::vector<double> indegree;
@@ -757,8 +770,8 @@ int main(int argc, char **argv)
     setup_exp_lookup_table(par, spike_exp_inh, spike_exp_exc, trunc_step_inh, trunc_step_exc);
     double spike_contribution_sum, potential_prev;
 
-    const double dt = par.dt;
-    const double sqrt_dt = sqrt(par.dt);
+    const double dt = par.stepsize;
+    const double sqrt_dt = sqrt(par.stepsize);
     const int    network_size = par.network_size;
     const double noise_intensity = par.noise_intensity;
     const double current_const = par.current_const;
@@ -770,7 +783,7 @@ int main(int argc, char **argv)
     const bool   outCurrentStochSeries = par.outCurrentStochSeries;
 
     int	now_step = 0, diff_step;
-    const int total_step = static_cast<int>(par.duration/par.dt);
+    const int total_step = static_cast<int>(par.duration/par.stepsize);
     std::vector<double> potential(par.network_size);
     std::vector<double> recovery(par.network_size);
     std::vector<double> current_synap(par.network_size);
@@ -789,14 +802,9 @@ int main(int argc, char **argv)
     const int conductance_step_size = 100;
     const double ddt = dt/conductance_step_size;
     const double sqrt_ddt = sqrt(dt/conductance_step_size);
-    // std::vector<double> synaptic_noise_intensity(par.network_size);
-    // for (size_t i = 0; i < synaptic_noise_intensity.size(); ++i) {
-    //     synaptic_noise_intensity[i] = sqrt(2 * par.noise_intensity * indegree[i]);
-    // }
 
     std::vector<float> potential_series_buf, recovery_series_buf, current_synap_series_buf,
-                      conductance_exc_series_buf, conductance_inh_series_buf,
-                      current_stoch_series_buf;
+                      conductance_exc_series_buf, conductance_inh_series_buf, current_stoch_series_buf;
     std::ofstream file_potential_series, file_recovery_series, file_current_synap_series,
         file_conductance_exc_series, file_conductance_inh_series, file_current_stoch_series;
     if (par.outPotentialSeries) {
@@ -806,7 +814,7 @@ int main(int argc, char **argv)
             file_potential_series.close();
             file_potential_series.open(par.outfile_potential_series, std::ios::app | std::ios::binary);
         } catch(std::ifstream::failure const&) { error_handler::throw_error("file_access", par.outfile_potential_series); }
-        potential_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESHOLD / par.network_size + 1) * par.network_size));
+        potential_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESH / par.network_size + 1) * par.network_size));
         for (int i = 0; i < par.network_size; ++i) { potential_series_buf.push_back(potential[i]); }
     }
     if (par.outRecoverySeries) {
@@ -816,7 +824,7 @@ int main(int argc, char **argv)
             file_recovery_series.close();
             file_recovery_series.open(par.outfile_recovery_series, std::ios::app | std::ios::binary);
         } catch(std::ifstream::failure const&) { error_handler::throw_error("file_access", par.outfile_recovery_series); }
-        recovery_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESHOLD / par.network_size + 1) * par.network_size));
+        recovery_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESH / par.network_size + 1) * par.network_size));
         for (int i = 0; i < par.network_size; ++i) { recovery_series_buf.push_back(recovery[i]); }
     }
     if (par.outCurrentSynapSeries) {
@@ -826,7 +834,7 @@ int main(int argc, char **argv)
             file_current_synap_series.close();
             file_current_synap_series.open(par.outfile_current_synap_series, std::ios::app | std::ios::binary);
         } catch(std::ifstream::failure const&) { error_handler::throw_error("file_access", par.outfile_current_synap_series); }
-        current_synap_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESHOLD / par.network_size + 1) * par.network_size));
+        current_synap_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESH / par.network_size + 1) * par.network_size));
         for (int i = 0; i < par.network_size; ++i) { current_synap_series_buf.push_back(current_synap[i]); }
     }
     if (par.outConductanceEXCSeries) {
@@ -836,7 +844,7 @@ int main(int argc, char **argv)
             file_conductance_exc_series.close();
             file_conductance_exc_series.open(par.outfile_conductance_exc_series, std::ios::app | std::ios::binary);
         } catch(std::ifstream::failure const&) { error_handler::throw_error("file_access", par.outfile_conductance_exc_series); }
-        conductance_exc_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESHOLD / par.network_size + 1) * par.network_size));
+        conductance_exc_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESH / par.network_size + 1) * par.network_size));
         for (int i = 0; i < par.network_size; ++i) { conductance_exc_series_buf.push_back(0); }
     }
     if (par.outConductanceINHSeries) {
@@ -846,7 +854,7 @@ int main(int argc, char **argv)
             file_conductance_inh_series.close();
             file_conductance_inh_series.open(par.outfile_conductance_inh_series, std::ios::app | std::ios::binary);
         } catch(std::ifstream::failure const&) { error_handler::throw_error("file_access", par.outfile_conductance_inh_series); }
-        conductance_inh_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESHOLD / par.network_size + 1) * par.network_size));
+        conductance_inh_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESH / par.network_size + 1) * par.network_size));
         for (int i = 0; i < par.network_size; ++i) { conductance_inh_series_buf.push_back(0); }
     }
     if (par.outCurrentStochSeries) {
@@ -856,7 +864,7 @@ int main(int argc, char **argv)
             file_current_stoch_series.close();
             file_current_stoch_series.open(par.outfile_current_stoch_series, std::ios::app | std::ios::binary);
         } catch(std::ifstream::failure const&) { error_handler::throw_error("file_access", par.outfile_current_stoch_series); }
-        current_stoch_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESHOLD / par.network_size + 1) * par.network_size));
+        current_stoch_series_buf.reserve(static_cast<unsigned int>((TIMESERIES_BUFFSIZE_THRESH / par.network_size + 1) * par.network_size));
         for (int i = 0; i < par.network_size; ++i) { current_stoch_series_buf.push_back(0.0); }
     }
 
@@ -886,7 +894,6 @@ int main(int argc, char **argv)
                 if (now_step == progress_step[n]) {
                     std::cout << "(" << n << "0%) step: " << now_step << "/" << total_step;
                     std::cout << "\n      total spikes: " << total_spike << "\n";
-                    // std::cout << "      time elapsed: " << static_cast<int>((clock() - beg_sim)/CLOCKS_PER_SEC) << " s\n";
         }}}
 
         // Handling spike resets
@@ -894,11 +901,11 @@ int main(int argc, char **argv)
         {
             if (potential[i] >= model_param::Izh::V_s) {
                 if (neuron_type[i] == -1) {
-                    potential[i] = model_param::Izh::FS::c;
-                    recovery[i] += model_param::Izh::FS::d;
+                    potential[i] = model_param::Izh::inh::c;
+                    recovery[i] += model_param::Izh::inh::d;
                 } else {
-                    potential[i] = model_param::Izh::RS::c;
-                    recovery[i] += model_param::Izh::RS::d;
+                    potential[i] = model_param::Izh::exc::c;
+                    recovery[i] += model_param::Izh::exc::d;
                 }
                 spike_timesteps[i].push_back(now_step);
                 justSpiked[i] = 1;
@@ -933,26 +940,8 @@ int main(int argc, char **argv)
                 conductance_exc[i] += synaptic_weights[i][in_exc] * spike_contribution_sum;
             }
 
-            /* numerical evaluation of conductance */
-            // spike_contribution_sum = 0;
-            // for (auto &in_inh : inh_links_idx[i]) { spike_contribution_sum -= justSpiked[in_inh] * synaptic_weights[i][in_inh]; }
-            // for (int h = 0; h < conductance_step_size; ++h) {
-            //     conductance_inh[i] -= conductance_inh[i]/model::synapse::inh::decay_time_constant * ddt
-            //         + synaptic_noise_intensity[i] * norm_dist(random_generator) * sqrt_ddt; // synaptic noise term
-            // }
-            // conductance_inh[i] += spike_contribution_sum;
-
-            // spike_contribution_sum = 0;
-            // for (auto &in_exc : exc_links_idx[i]) { spike_contribution_sum += justSpiked[in_exc] * synaptic_weights[i][in_exc]; }
-            // for (int h = 0; h < conductance_step_size; ++h) {
-            //     conductance_exc[i] -= conductance_exc[i]/model::synapse::exc::decay_time_constant * ddt
-            //         + synaptic_noise_intensity[i] * norm_dist(random_generator) * sqrt_ddt; // synaptic noise term
-            // }
-            // conductance_exc[i] += spike_contribution_sum;
-
             /* current, potential and recovery */
-            current_synap[i] = (conductance_exc[i] * (model_param::Gsynap::V_E - potential[i])
-                + conductance_inh[i] * (model_param::Gsynap::V_I - potential[i]));
+            current_synap[i] = (conductance_exc[i] * (model_param::Gsynap::V_E - potential[i]) + conductance_inh[i] * (model_param::Gsynap::V_I - potential[i]));
 
             potential_prev = potential[i];  // membrane potential of previous step
             current_stoch[i] = noise_intensity * norm_dist(random_generator) / sqrt_dt; // stochastic current
@@ -963,9 +952,9 @@ int main(int argc, char **argv)
             }
 
             if (neuron_type[i] == -1) {
-                recovery[i] += model_param::Izh::FS::a * (model_param::Izh::FS::b * potential_prev - recovery[i]) * dt;
+                recovery[i] += model_param::Izh::inh::a * (model_param::Izh::inh::b * potential_prev - recovery[i]) * dt;
             } else {
-                recovery[i] += model_param::Izh::RS::a * (model_param::Izh::RS::b * potential_prev - recovery[i]) * dt;
+                recovery[i] += model_param::Izh::exc::a * (model_param::Izh::exc::b * potential_prev - recovery[i]) * dt;
         }}
 
         /* Here, the membrane potential (and other variables) of all neurons
@@ -979,42 +968,42 @@ int main(int argc, char **argv)
         {
             for (auto &v : potential) { potential_series_buf.push_back(v); }
             // Flush to output file and clear buffer if size exceed "TIMESERIES_BUFF"
-            if (potential_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESHOLD) {
+            if (potential_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESH) {
                 file_potential_series.write(reinterpret_cast<char*>(&potential_series_buf[0]), potential_series_buf.size()*sizeof(float));
                 potential_series_buf.clear();
         }}
         if (outRecoverySeries)
         {
             for (auto &u : recovery) { recovery_series_buf.push_back(u); }
-            if (recovery_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESHOLD) {
+            if (recovery_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESH) {
                 file_recovery_series.write(reinterpret_cast<char*>(&recovery_series_buf[0]), recovery_series_buf.size()*sizeof(float));
                 recovery_series_buf.clear();
         }}
         if (outCurrentSynapSeries)
         {
             for (auto &i : current_synap) { current_synap_series_buf.push_back(i); }
-            if (current_synap_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESHOLD) {
+            if (current_synap_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESH) {
                 file_current_synap_series.write(reinterpret_cast<char*>(&current_synap_series_buf[0]), current_synap_series_buf.size()*sizeof(float));
                 current_synap_series_buf.clear();
         }}
         if (outConductanceEXCSeries)
         {
             for (auto &i : conductance_exc) { conductance_exc_series_buf.push_back(i); }
-            if (conductance_exc_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESHOLD) {
+            if (conductance_exc_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESH) {
                 file_conductance_exc_series.write(reinterpret_cast<char*>(&conductance_exc_series_buf[0]), conductance_exc_series_buf.size()*sizeof(float));
                 conductance_exc_series_buf.clear();
         }}
         if (outConductanceINHSeries)
         {
             for (auto &i : conductance_inh) { conductance_inh_series_buf.push_back(i); }
-            if (conductance_inh_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESHOLD) {
+            if (conductance_inh_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESH) {
                 file_conductance_inh_series.write(reinterpret_cast<char*>(&conductance_inh_series_buf[0]), conductance_inh_series_buf.size()*sizeof(float));
                 conductance_inh_series_buf.clear();
         }}
         if (outCurrentStochSeries)
         {
             for (auto &i : current_stoch) { current_stoch_series_buf.push_back(i); }
-            if (current_stoch_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESHOLD) {
+            if (current_stoch_series_buf.size() >= TIMESERIES_BUFFSIZE_THRESH) {
                 file_current_stoch_series.write(reinterpret_cast<char*>(&current_stoch_series_buf[0]), current_stoch_series_buf.size()*sizeof(float));
                 current_stoch_series_buf.clear();
         }}

@@ -5,7 +5,7 @@
  *        modelled by Adaptive Exponential integrate-and-fire model and
  *        connected by conductance-based synapses
  * @version 6
- * @date 2024-2-10
+ * @date 2024-Feb-10
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
  * 
  * Compile command:
@@ -26,46 +26,51 @@
 #endif
 
 
-std::string code_ver = "Version 6\nLast Update: 09 Feburary 2024\n";
-std::string prog_info = "This program simulates the dynamics of a\nnetwork of spiking neurons with Adaptive\nExponential integrate-and-fire model and\nconductance-based synapse model\n";
+std::string code_ver = "Version 6\nLast Update: 10 Feburary 2024\n";
+std::string prog_info = "This program simulates the dynamics of a network\nof spiking neurons modelled by Adaptive Exponential\nintegrate-and-fire model and connected by\nconductance-based synapse model\n";
 
 namespace model_param
 {
-    namespace AdEx {
+    namespace AdEx
+    {
         // Parameters adopted and modified from: J Comput Neurosci (2018) 45:1–28
-        const double C = 1; // membrane capacitance, pF
+        const double C = 1; // membrane capacitance
         const double E_L = -70; // leak reversal potential, mV
         const double V_T = -50; // threshold potential, mV
         const double delta_T = 2.5; // threshold slope factor, mV
-        const double c = -58; // spike-triggered reset potential, mV, equal to E_L
+        const double c = -58; // spike-triggered reset potential, mV
         const double V_s = 30; // spike potentil threshold, mV
 
         namespace exc {
-            const double g_L = 0.2; // leak conductance, nS
-            const double tau_u = 100; // adaptation time constant, ms
-            const double b = 0.2; // adaptation coupling parameter, subthreshold adaptation conductance, uS
-            const double d = 8; // spike-triggered adaption increment, nA
+            const double g_L = 0.2; // leak conductance
+            const double tau_u = 100; // adaptation decay time constant, ms
+            const double b = 0.2; // adaptation coupling parameter, subthreshold adaptation conductance
+            const double d = 8; // spike-triggered adaption increment
         }
         namespace inh {
-            const double g_L = 0.2; // leak conductance, nS
-            const double tau_u = 20; // adaptation time constant, ms
-            const double b = 0.2; // adaptation coupling parameter, subthreshold adaptation conductance, uS
-            const double d = 2; // spike-triggered adaption increment, nA
-    }}
-    namespace Gsynap {
-        const double V_E = 0; // reversal_potential of the EXC synapse, mV
-        const double tau_GE = 5; // adaptation decay time constant, ms
-        const double V_I = -80; // reversal_potential of the INH synapse, mV
-        const double tau_GI = 6; // adaptation decay time constant, ms
-}}
+            const double g_L = 0.2; // leak conductance
+            const double tau_u = 20; // adaptation decay time constant, ms
+            const double b = 0.2; // adaptation coupling parameter, subthreshold adaptation conductance
+            const double d = 2; // spike-triggered adaption increment
+        }
+    }
+
+    namespace Gsynap
+    {
+        const double V_E = 0; // reversal_potential of the EXC synapses, mV
+        const double tau_GE = 5; // conductance decay time constant of the EXC synapses, ms
+        const double V_I = -80; // reversal_potential of the INH synapses, mV
+        const double tau_GI = 6; // conductance decay time constant of the INH synapses, ms
+    }
+}
 
 
 #define _CRT_SECURE_NO_WARNINGS
 #define NO_MAIN_ARGUMENT                  argc == 1
 
 /* I-O files & directories */
-#define IN_FNAME_PARAMETERS         "vars.txt"
-#define OUT_FOLDER                  "output"
+#define IN_FNAME_PARAMETERS                "vars.txt"
+#define OUT_FOLDER                         "output"
 #ifdef _WIN32 // For Windows
 #define OUT_FNAME_INFO                     "output\\info.txt"
 #define OUT_FNAME_SETTINGS                 "output\\sett.json"
@@ -222,8 +227,10 @@ public:
 
     const double duration;
     const double stepsize;
-    const double rng_seed;
+
     const double noise_intensity;
+    const double rng_seed;
+
     const double current_const;
 
     const std::string infile_stimulus;
@@ -244,6 +251,7 @@ public:
     const std::string outfile_conductance_exc_series;
     const std::string outfile_conductance_inh_series;
     const std::string outfile_current_stoch_series;
+
     const bool        outPotentialSeries;
     const bool        outAdaptationSeries;
     const bool        outCurrentSynapSeries;
@@ -287,12 +295,12 @@ public:
         outfile_conductance_inh_series(OUT_FNAME_CONDUCTANCE_INH_SERIES),
         outfile_current_stoch_series(OUT_FNAME_CURRENT_STOCH_SERIES),
 
-        outPotentialSeries((input_param[14] == "true") ? true : false),
-        outAdaptationSeries((input_param[15] == "true") ? true : false),
-        outCurrentSynapSeries((input_param[16] == "true") ? true : false),
-        outConductanceEXCSeries((input_param[17] == "true") ? true : false),
-        outConductanceINHSeries((input_param[18] == "true") ? true : false),
-        outCurrentStochSeries((input_param[19] == "true") ? true : false)
+        outPotentialSeries((input_param[15] == "true") ? true : false),
+        outAdaptationSeries((input_param[16] == "true") ? true : false),
+        outCurrentSynapSeries((input_param[17] == "true") ? true : false),
+        outConductanceEXCSeries((input_param[18] == "true") ? true : false),
+        outConductanceINHSeries((input_param[19] == "true") ? true : false),
+        outCurrentStochSeries((input_param[20] == "true") ? true : false)
 
     { if (!suppressConsoleMsg) { std::cout << "OKAY, parameters imported from \"" << filename << "\"\n"; }}
 
@@ -426,7 +434,7 @@ namespace fileio
             try {
                 ofs.open(par.outfile_info, std::ios::trunc);
                 ofs << code_ver << '\n'
-                    << "--------------------------------------------------\n"
+                    << "------------------------------------------------------------\n"
                     << "computation finished at: " << datetime_buf << '\n'
                     << "time elapsed: " << time_elapsed << " s\n\n"
                     << "[network and synaptic weights]" << '\n'
@@ -436,10 +444,10 @@ namespace fileio
                     << "inh weight scale factor:\t" << par.weights_scale_factor_inh << "\n\n"
                     << "[numerical settings]" << '\n'
                     << "time step size:\t\t\t" << par.stepsize << " ms" << '\n'
-                    << "duration:\t\t\t\t" << par.duration << " ms" << "\n\n"
+                    << "duration:\t\t\t" << par.duration << " ms" << "\n\n"
                     << "[inputs to neurons]" << '\n'
                     << "random number seed:\t\t" << par.rng_seed << '\n'
-                    << "noise intensity (alpha):\t" << par.noise_intensity << '\n'
+                    << "noise intensity:\t\t" << par.noise_intensity << '\n'
                     << "constant current:\t\t" << par.current_const << '\n'
                     << "stimulus file:\t\t\t" << par.infile_stimulus << "\n\n"
                     << "[initial values]\n"
@@ -458,7 +466,7 @@ namespace fileio
             ofs.exceptions(std::ofstream::failbit | std::ofstream::badbit);
             try {
                 ofs.open(par.outfile_info, std::ios::app);
-                ofs << "--------------------------------------------------\n"
+                ofs << "------------------------------------------------------------\n"
                     << "computation finished at: " << datetime_buf
                     << "time elapsed: " << time_elapsed << " s\n\n"
                     << "extend duration to:\t\t" << par.duration << " ms\n\n";
@@ -947,10 +955,8 @@ int main(int argc, char **argv)
             current_stoch[i] = noise_intensity * norm_dist(random_generator) / sqrt_dt; // stochastic current
             if (stimulus_series.size()==0) {
                 if (neuron_type[i] == -1) {
-                    // potential[i] += (-model_param::AdEx::inh::g_L*(potential[i]-model_param::AdEx::E_L) + model_param::AdEx::inh::g_L*model_param::AdEx::delta_T*exp((potential[i]-model_param::AdEx::V_T)/model_param::AdEx::delta_T) - adaptation[i] + current_synap[i] + current_const + current_stoch[i]) / model_param::AdEx::C * dt;
                     potential[i] += ((model_param::AdEx::inh::g_L/model_param::AdEx::C) * (model_param::AdEx::delta_T*exp((potential[i]-model_param::AdEx::V_T)/model_param::AdEx::delta_T) - potential[i] + model_param::AdEx::E_L) - adaptation[i] + current_synap[i]/model_param::AdEx::C + current_const + current_stoch[i]) * dt;
                 } else {
-                    // potential[i] += (-model_param::AdEx::exc::g_L*(potential[i]-model_param::AdEx::E_L) + model_param::AdEx::exc::g_L*model_param::AdEx::delta_T*exp((potential[i]-model_param::AdEx::V_T)/model_param::AdEx::delta_T) - adaptation[i] + current_synap[i] + current_const + current_stoch[i]) / model_param::AdEx::C * dt;
                     potential[i] += ((model_param::AdEx::exc::g_L/model_param::AdEx::C) * (model_param::AdEx::delta_T*exp((potential[i]-model_param::AdEx::V_T)/model_param::AdEx::delta_T) - potential[i] + model_param::AdEx::E_L) - adaptation[i] + current_synap[i]/model_param::AdEx::C + current_const + current_stoch[i]) * dt;
                 }
             } else {
@@ -961,7 +967,6 @@ int main(int argc, char **argv)
             }}
 
             if (neuron_type[i] == -1) {
-                // adaptation[i] += 1/model_param::AdEx::inh::tau_u * (model_param::AdEx::inh::b*(potential_prev - model_param::AdEx::E_L) - adaptation[i]) * dt;
                 adaptation[i] += 1/model_param::AdEx::inh::tau_u * (model_param::AdEx::inh::b/model_param::AdEx::C * (potential_prev - model_param::AdEx::E_L) - adaptation[i]) * dt;
             } else {
                 adaptation[i] += 1/model_param::AdEx::exc::tau_u * (model_param::AdEx::exc::b/model_param::AdEx::C * (potential_prev - model_param::AdEx::E_L) - adaptation[i]) * dt;
