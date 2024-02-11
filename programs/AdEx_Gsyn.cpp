@@ -33,24 +33,25 @@ namespace model_param
 {
     namespace AdEx
     {
-        // Parameters adopted and modified from: J Comput Neurosci (2018) 45:1–28
         const double C = 1; // membrane capacitance
-        const double E_L = -70; // leak reversal potential, mV
+        const double E_L = -75.457; // leak reversal potential, mV
         const double V_T = -50; // threshold potential, mV
-        const double delta_T = 2.5; // threshold slope factor, mV
-        const double c = -58; // spike-triggered reset potential, mV
-        const double V_s = 30; // spike potentil threshold, mV
+        const double delta_T = 3.5; // threshold slope factor, mV
+        const double V_s = 30; // spike potential threshold, mV
+        const double E_A = 0; // adaptation reversal potential, mV
 
         namespace exc {
-            const double g_L = 0.2; // leak conductance
-            const double tau_u = 100; // adaptation decay time constant, ms
+            const double g_L = 0.6; // leak conductance
+            const double tau_u = 50; // adaptation decay time constant, ms
             const double b = 0.2; // adaptation coupling parameter, subthreshold adaptation conductance
+            const double c = -58; // spike-triggered reset potential, mV
             const double d = 8; // spike-triggered adaption increment
         }
         namespace inh {
-            const double g_L = 0.2; // leak conductance
-            const double tau_u = 20; // adaptation decay time constant, ms
+            const double g_L = 0.6; // leak conductance
+            const double tau_u = 10; // adaptation decay time constant, ms
             const double b = 0.2; // adaptation coupling parameter, subthreshold adaptation conductance
+            const double c = -58; // spike-triggered reset potential, mV
             const double d = 2; // spike-triggered adaption increment
         }
     }
@@ -536,12 +537,14 @@ namespace fileio
             ofs << '|';
             ofs << par.init_potential << '|' << par.init_adaptation << '|'
                 << model_param::AdEx::exc::g_L << '|' << model_param::AdEx::exc::tau_u << '|'
-                << model_param::AdEx::exc::b << '|' << model_param::AdEx::exc::d << '|'
+                << model_param::AdEx::exc::b << '|' << model_param::AdEx::exc::c << '|'
+                << model_param::AdEx::exc::d << '|'
                 << model_param::AdEx::inh::g_L << '|' << model_param::AdEx::inh::tau_u << '|'
-                << model_param::AdEx::inh::b << '|' << model_param::AdEx::inh::d << '|'
+                << model_param::AdEx::inh::b << '|' << model_param::AdEx::inh::c << '|'
+                << model_param::AdEx::exc::d << '|'
                 << model_param::AdEx::C << '|' << model_param::AdEx::E_L << '|'
                 << model_param::AdEx::V_T << '|' << model_param::AdEx::delta_T << '|'
-                << model_param::AdEx::V_s << '|' << model_param::AdEx::c << '|'
+                << model_param::AdEx::V_s << '|' << model_param::AdEx::E_A << '|'
                 << model_param::Gsynap::tau_GE << '|' << model_param::Gsynap::tau_GI << '|'
                 << model_param::Gsynap::V_E << '|' << model_param::Gsynap::V_I << '|';
             ofs << par.infile_weights << '|'
@@ -909,10 +912,10 @@ int main(int argc, char **argv)
         {
             if (potential[i] >= model_param::AdEx::V_s) {
                 if (neuron_type[i] == -1) {
-                    potential[i] = model_param::AdEx::c;
+                    potential[i] = model_param::AdEx::inh::c;
                     adaptation[i] += model_param::AdEx::inh::d;
                 } else {
-                    potential[i] = model_param::AdEx::c;
+                    potential[i] = model_param::AdEx::exc::c;
                     adaptation[i] += model_param::AdEx::exc::d;
                 }
                 spike_timesteps[i].push_back(now_step);
@@ -967,9 +970,9 @@ int main(int argc, char **argv)
             }}
 
             if (neuron_type[i] == -1) {
-                adaptation[i] += 1/model_param::AdEx::inh::tau_u * (model_param::AdEx::inh::b/model_param::AdEx::C * (potential_prev - model_param::AdEx::E_L) - adaptation[i]) * dt;
+                adaptation[i] += 1/model_param::AdEx::inh::tau_u * (model_param::AdEx::inh::b/model_param::AdEx::C * (potential_prev - model_param::AdEx::E_A) - adaptation[i]) * dt;
             } else {
-                adaptation[i] += 1/model_param::AdEx::exc::tau_u * (model_param::AdEx::exc::b/model_param::AdEx::C * (potential_prev - model_param::AdEx::E_L) - adaptation[i]) * dt;
+                adaptation[i] += 1/model_param::AdEx::exc::tau_u * (model_param::AdEx::exc::b/model_param::AdEx::C * (potential_prev - model_param::AdEx::E_A) - adaptation[i]) * dt;
         }}
 
         /* Here, the membrane potential (and other variables) of all neurons
