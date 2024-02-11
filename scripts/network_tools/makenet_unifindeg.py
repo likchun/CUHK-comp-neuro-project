@@ -1,7 +1,7 @@
 import os, sys
 this_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(this_dir,".."))
-from libs.mylib4 import NeuronalNetwork, qgraph
+from scripts.libs.mylib import NeuronalNetwork, qgraph
 from sklearn.mixture import GaussianMixture
 from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit

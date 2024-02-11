@@ -1,7 +1,7 @@
 import os, sys
 this_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(this_dir,".."))
-from scripts.libs.mylib4 import qgraph, NeuronalNetwork
+from scripts.libs.mylib import qgraph, NeuronalNetwork
 from matplotlib import pyplot as plt
 from scipy import stats
 import numpy as np
