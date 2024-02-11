@@ -1,6 +1,6 @@
 """
-MyLib4
-------
+MyLib
+-----
 Tools & templates
 
 Last update: 10 Feb, 2024 (evening)
