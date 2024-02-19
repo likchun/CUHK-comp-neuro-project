@@ -3,7 +3,7 @@ AvalancheLib
 ------------
 From Don
 
-Last update: 8 Feburary, 2024
+Last update: 14 Feburary, 2024
 """
 
 import numpy as np
@@ -32,7 +32,6 @@ def split_by_diff(differences, threshold, min_size):
     groups = [np.arange(gap_ids[i] + 1, gap_ids[i+1] + 1) for i in np.arange(len(gap_ids) - 1) if gap_ids[i+1] - gap_ids[i] >= min_size]
     return groups if groups else [[]]
 
-
 def local_argmin_between_peaks(histogram, bin_centers, between_peak):
     peak_ids = find_peaks(histogram, distance=2)[0]
     left_peak_ids = peak_ids[bin_centers[peak_ids] < between_peak]
@@ -42,7 +41,6 @@ def local_argmin_between_peaks(histogram, bin_centers, between_peak):
     left_peak_id = left_peak_ids[-1]
     right_peak_id = right_peak_ids[0]
     return left_peak_id + np.argmin(histogram[left_peak_id:right_peak_id])
-
 
 def find_bursts(logisis, bins, max_cutoff, min_void, min_burst_size):
     # output: (groups, flag, (intra_burst_peak, inter_burst_peak, void, logisi_threshold))
@@ -148,9 +146,14 @@ def find_bursts(logisis, bins, max_cutoff, min_void, min_burst_size):
 
     return (groups, flag, (intra_burst_peak, inter_burst_peak, best_void, cutoff))
 
-
-def _main(dt, num_neuron, steps_list, max_cutoff, bin_width, min_void, min_burst_size, fix_max_cutoff=False, save_dir="./"):
-    logisis_list = [np.log10(np.diff(steps) * dt) for steps in steps_list]
+def get_burst_ranges_list(dt, steps_list, max_cutoff, bin_width, min_void, min_burst_size, fix_max_cutoff=False, save_dir="./"):
+    """
+    - burst_ranges_list is a list of list of range
+      - 1st dim: different neurons
+      - 2nd dim: different bursts
+      - 3rd dim: the index of steps of different spikes of a burst that is each element points to a step of a burst of a neuron 
+    - burst_mask is a bool array of whether a neuron is bursting"""
+    logisis_list = [np.log10(np.diff(steps.astype(float)) * dt) for steps in steps_list]
     logisis_all = np.hstack(logisis_list)
     if len(logisis_all) and not fix_max_cutoff:
         vmin, vmax = logisis_all.min(), logisis_all.max()
@@ -165,8 +168,8 @@ def _main(dt, num_neuron, steps_list, max_cutoff, bin_width, min_void, min_burst
         bins, centers, histogram_all = [], [], []
     burst_ranges_list, flags, other_outputs = zip(*[find_bursts(logisis=logisis, bins=bins, max_cutoff=max_cutoff, min_void=min_void, min_burst_size=min_burst_size) for logisis in logisis_list])
     burst_ranges_list = [[burst_range for burst_range in burst_ranges if len(burst_range)] for burst_ranges in burst_ranges_list]
-    print(f"bursting fraction: {np.sum([len(burst_ranges) > 0 for burst_ranges in burst_ranges_list])} ({np.sum([len(burst_ranges) > 0 for burst_ranges in burst_ranges_list]) / num_neuron * 100:.3g}%)")
-    print(", ".join([f"flag {i}: {(flags == i).sum()}" for i in np.unique(flags)]))
+    # print(f"bursting fraction: {np.sum([len(burst_ranges) > 0 for burst_ranges in burst_ranges_list])} ({np.sum([len(burst_ranges) > 0 for burst_ranges in burst_ranges_list]) / num_neuron * 100:.3g}%)")
+    # print(", ".join([f"flag {i}: {(flags == i).sum()}" for i in np.unique(flags)]))
     # intra_burst_peaks, inter_burst_peaks, voids, isi_thresholds = zip(*other_outputs)
     # np.save(save_dir + "flags.npy", flags)
     # np.save(save_dir + "intra_burst_peaks.npy", intra_burst_peaks)
@@ -176,20 +179,27 @@ def _main(dt, num_neuron, steps_list, max_cutoff, bin_width, min_void, min_burst
     return burst_ranges_list
 
 
-def bursting_fraction(spike_steps:np.ndarray, stepsize_ms:float, num_neuron:int, save_dir=None):
-    # burst_ranges_list is a list of list of range
-    #   1st dim: different neurons
-    #   2nd dim: different bursts
-    #   3nd dim: the index of steps of different spikes of a burst
-    #   that is each element points to a step of a burst of a neuron 
-    # burst_mask is a bool array of whether a neuron is bursting
-    burst_ranges_list = _main(dt=stepsize_ms, num_neuron=num_neuron, steps_list=spike_steps, max_cutoff=1, bin_width=0.1, min_void=0.7, min_burst_size=2)
-    burst_mask = np.hstack([len(burst_ranges) > 0 for burst_ranges in burst_ranges_list])
-    if save_dir is not None:
-        if not os.path.exists(save_dir): os.makedirs(save_dir)
-        else: raise FileExistsError
-        with open(os.path.join(save_dir,"burst_ranges_list.pkl"), "wb") as f:
-            pickle.dump(burst_ranges_list, f, pickle.HIGHEST_PROTOCOL)
-        np.save(os.path.join(save_dir,"burst_mask.npy"), burst_mask)
-    bursting_fraction = burst_mask.mean()
-    return bursting_fraction
+class BurstDetect:
+
+    def __init__(self, spike_steps:np.ndarray, stepsize_ms:float):
+        self._spike_steps = spike_steps
+        self._stepsize_ms = stepsize_ms
+        self.burst_data = get_burst_ranges_list(dt=self._stepsize_ms, steps_list=self._spike_steps, max_cutoff=1, bin_width=0.1, min_void=0.7, min_burst_size=2)
+        self._burst_neuron_mask = np.hstack([len(burst_ranges) > 0 for burst_ranges in self.burst_data])
+
+    def save_burst_data(self, save_dir=None):
+        if save_dir is not None:
+            if not os.path.exists(save_dir): os.makedirs(save_dir)
+            else: raise FileExistsError
+            with open(os.path.join(save_dir,"burst_data.pkl"), "wb") as f:
+                pickle.dump(self.burst_data, f, pickle.HIGHEST_PROTOCOL)
+            np.save(os.path.join(save_dir,"burst_mask.npy"), self.burst_mask)
+
+    @property
+    def bursting_fraction(self):
+        return self._burst_neuron_mask.mean()
+
+    @property
+    def burst_size(self):
+        return np.array([np.array([len(burst) for burst in neuron]) for neuron in self.burst_ranges_list], dtype=object)
+

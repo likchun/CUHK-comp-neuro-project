@@ -3,14 +3,17 @@
  * @author likchun@outlook.com
  * @brief numerically simulate the dynamics of a network of spiking neurons
  *        modelled by Izhikevich's model and connected by conductance-based synapses
- * @version 6
- * @date 2024-Feb-10
+ * @version 7
+ * @date 2024-Feb-14
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
  * 
  * Compile command:
- * (MacOS) clang++ ./IZH_Gsyn.cpp -std=c++17 -O3 -o ./IZH_Gsyn.o -I"/Users/likchun/Libraries/c++/boost_1_78_0"
+ * (MacOS) clang++ "./IZH_Gsyn_[lambda_d].cpp" -std=c++17 -O3 -o "./IZH_Gsyn_[lambda_d].o" -I"/Users/likchun/Libraries/c++/boost_1_78_0"
  * 
  */
+
+
+double lambda = 20;
 
 
 #include "boost/random.hpp"
@@ -25,7 +28,7 @@
 #endif
 
 
-std::string code_ver = "Version 6\nLast Update: 10 Feburary 2024\n";
+std::string code_ver = "Version 7\nLast Update: 14 Feburary 2024\n";
 std::string prog_info = "This program simulates the dynamics of a network\nof spiking neurons modelled by Izhikevich's model\nand connected by conductance-based synapse model\n";
 
 namespace model_param
@@ -38,13 +41,13 @@ namespace model_param
             const double a = 0.02; // reciprocal of recovery variable decay time constant
             const double b = 0.2; // recovery variable coupling parameter
             const double c = -65.0; // spike-triggered reset potential
-            const double d = 8.0; // spike-triggered recovery variable increment
+            const double d = 8.0*lambda; // spike-triggered recovery variable increment
         }
         namespace inh {
             const double a = 0.1; // reciprocal of recovery variable decay time constant
             const double b = 0.2; // recovery variable coupling parameter
             const double c = -65.0; // spike-triggered reset potential
-            const double d = 2.0; // spike-triggered recovery variable increment
+            const double d = 2.0*lambda; // spike-triggered recovery variable increment
         }
     }
 
@@ -583,6 +586,7 @@ namespace fileio
 void display_info(Parameters &par)
 {
     std::cout << "---------------------------------------------\n"
+            //   << "|program name:            " << par.infile_weights << '\n'
               << "|synaptic weights file:   " << par.infile_weights << '\n'
               << "|number of neurons:       " << par.network_size << '\n'
               << "|exc weight scale factor: " << par.weights_scale_factor_exc << '\n'

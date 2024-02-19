@@ -3,7 +3,7 @@ MyLib
 -----
 Tools & templates
 
-Last update: 10 Feb, 2024 (evening)
+Last update: 18 Feb, 2024 (noon)
 """
 
 import os
@@ -446,7 +446,8 @@ class NeuronalDynamics:
             synap_current_filepath = os.path.join(directory,synap_current)
             stoch_current_filepath = os.path.join(directory,stoch_current)
             self._num_neuron = num_neuron
-            self._num_trim_step = 0
+            self._num_step_beg_trim = 0
+            self._num_step_end_trim = 0
             self._v_filepath = potential_filepath
             self._u_filepath = adaptation_filepath
             self._synapi_filepath = synap_current_filepath
@@ -456,36 +457,37 @@ class NeuronalDynamics:
 
         @property
         def membrane_potential(self):
-            try: return load_time_series(self._v_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            try: return load_time_series(self._v_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no membrane potential series file \"{}\"".format(self._v_filepath))
 
         @property
         def recovery_variable(self):
-            try: return load_time_series(self._u_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            try: return load_time_series(self._u_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no recovery variable series file \"{}\"".format(self._u_filepath))
 
         @property
         def presynaptic_current(self):
-            try: return load_time_series(self._synapi_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            try: return load_time_series(self._synapi_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no presynaptic current series file \"{}\"".format(self._synapi_filepath))
 
         @property
         def conductance_exc(self):
-            try: return load_time_series(self._ge_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            try: return load_time_series(self._ge_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no presynaptic EXC conductance series file \"{}\"".format(self._ge_filepath))
 
         @property
         def conductance_inh(self):
-            try: return load_time_series(self._gi_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            try: return load_time_series(self._gi_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no presynaptic INH conductance series file \"{}\"".format(self._gi_filepath))
 
         @property
         def stochastic_current(self):
-            try: return load_time_series(self._stochi_filepath, num_neuron=self._num_neuron)[:,self._num_trim_step:]
+            try: return load_time_series(self._stochi_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no stochastic current series file \"{}\"".format(self._stochi_filepath))
 
-        def set_trim_transient_duration(self, transient_beg_t_ms:float, stepsize_ms:float):
-            self._num_trim_step = int(transient_beg_t_ms/stepsize_ms)
+        def set_trim_duration(self, trim_beg_t_ms:float, trim_end_t_ms:float, stepsize_ms:float):
+            self._num_step_beg_trim = int(trim_beg_t_ms/stepsize_ms)
+            self._num_step_end_trim = int(trim_end_t_ms/stepsize_ms)
 
     def time_series_data_from_file(self, num_neuron:int, directory:str,
             potential="memp.bin", adaptation="recv.bin", conductance_exc="gcde.bin",
@@ -524,20 +526,20 @@ class QuickGraph:
             ax.grid(True)
         return xdata, cumudens
 
-    def raster_plot(self, spike_times, ax=None, colors=None, time_range=["auto","auto"], **options):
-        """Units of `beg_t` and `end_t` are millisecond (ms). Neuron index starts from 1."""
+    def raster_plot(self, spike_times, ax=None, colors=None, time_range_ms=["auto","auto"], **options):
+        """Neuron index starts from 1."""
         if colors is None: colors = ["k" for _ in range(spike_times.size)]
         elif type(colors)==str: colors = [colors for _ in range(spike_times.size)]
-        if time_range[0] == "auto": time_range[0] = float(np.amin([x[0] for x in spike_times if x.size != 0]))
-        if time_range[1] == "auto": time_range[1] = float(np.amax([x[-1] for x in spike_times if x.size != 0]))
-        spike_times = np.array([x[np.where((time_range[0] < np.array(x)) & (np.array(x) < time_range[1]))] for x in spike_times],dtype=object)
+        if time_range_ms[0] == "auto": time_range_ms[0] = float(np.amin([x[0] for x in spike_times if x.size != 0]))
+        if time_range_ms[1] == "auto": time_range_ms[1] = float(np.amax([x[-1] for x in spike_times if x.size != 0]))
+        spike_times = np.array([x[np.where((time_range_ms[0] < np.array(x)) & (np.array(x) < time_range_ms[1]))] for x in spike_times],dtype=object)
         # [ax.scatter(x/1000, np.full(x.size, i+1), c=colors[i], lw=0, **options) for i,x in enumerate(spike_times)]
         [ax.plot(x/1000, np.full(x.size, i+1), c=colors[i], lw=0, **options) for i,x in enumerate(spike_times)]
 
-    def event_plot(self, spike_times, ax=None, colors=None, time_range=["auto","auto"], **options):
-        """Units of `beg_t` and `end_t` are millisecond (ms). Neuron index starts from 1."""
-        if time_range[0] == "auto": time_range[0] = 0
-        if time_range[1] == "auto": time_range[1] = float(np.amax(np.hstack(spike_times)))
+    def event_plot(self, spike_times, ax=None, colors=None, time_range_ms=["auto","auto"], **options):
+        """Neuron index starts from 1."""
+        if time_range_ms[0] == "auto": time_range_ms[0] = 0
+        if time_range_ms[1] == "auto": time_range_ms[1] = float(np.amax(np.hstack(spike_times)))
         if colors is None: colors = ["k" for _ in range(len(spike_times))]
         spike_times = [np.array([])]+list(spike_times)
         colors = ["k"]+list(colors)
@@ -697,13 +699,18 @@ class NeuroData:
         self.configs["num_step"] = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
         yaml.dump(self.configs, open(os.path.join(self.directory, "sett.yml"), 'w'), default_flow_style=False)
 
-    def trim_transient_dynamics(self, transient_beg_t_ms:float):
+    def remove_dynamics(self, remove_beg_t_ms:float, remove_end_t_ms:float):
+        """remove the first `remove_beg_t_ms` ms and the last `remove_end_t_ms` ms"""
         self.dynamics._reset_all()
-        self.dynamics.spike_steps = trim_spike_steps(self.dynamics.spike_steps,transient_beg_t_ms,self.configs["duration_ms"],self.configs["stepsize_ms"])-int(transient_beg_t_ms/self.configs["stepsize_ms"])
-        self.configs["duration_ms"] -= transient_beg_t_ms
-        self.dynamics._duration_ms -= transient_beg_t_ms
+        self.dynamics.spike_steps = trim_spike_steps(self.dynamics.spike_steps, remove_beg_t_ms, self.configs["duration_ms"]-remove_end_t_ms, self.configs["stepsize_ms"])-int(remove_beg_t_ms/self.configs["stepsize_ms"])
+        self.configs["duration_ms"] -= remove_beg_t_ms+remove_end_t_ms
+        self.dynamics._duration_ms -= remove_beg_t_ms+remove_end_t_ms
         self.dynamics._num_step = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
-        self.dynamics.time_series.set_trim_transient_duration(transient_beg_t_ms,self.configs["stepsize_ms"])
+        self.dynamics.time_series.set_trim_duration(remove_beg_t_ms, remove_end_t_ms, self.configs["stepsize_ms"])
+
+    def retain_dynamics(self, beg_t_ms:float, end_t_ms:float):
+        """retain only dynamics from `beg_t_ms` to `end_t_ms`"""
+        self.remove_dynamics(beg_t_ms, self.configs["duration_ms"]-end_t_ms)
 
     def remove_neurons(self, remove_index:list):
         """`remove_index`: a list of indices of neurons to be removed"""
@@ -736,4 +743,20 @@ qgraph.default_legend_style()
 qgraph.config_font("avenir")
 
 
-"""gridspec_kw={"width_ratios":[.7,1]}"""
+"""
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+gridspec_kw={"width_ratios":[.7,1]}
+
+
+fig = plt.figure(figsize=(15,15))
+gs = fig.add_gridspec(nrows=3, ncols=4,height_ratios=[4,1,1],width_ratios=[1,1,1,1],hspace=.5)
+
+ax1a = fig.add_subplot(gs[:,0])
+div1 = make_axes_locatable(ax1a)
+ax1b = div1.append_axes("bottom", "40%", pad=0, sharex=ax1a)
+ax1c = div1.append_axes("bottom", "40%", pad=0, sharex=ax1a)
+ax1d = div1.append_axes("bottom", "60%", pad=.2, sharex=ax1a)
+axes1 = [ax1a, ax1b, ax1c, ax1d]
+
+"""
