@@ -13,7 +13,7 @@
  */
 
 
-double lambda = 20;
+double lambda = 0;
 
 
 #include "boost/random.hpp"

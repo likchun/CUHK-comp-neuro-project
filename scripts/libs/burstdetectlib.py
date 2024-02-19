@@ -1,6 +1,6 @@
 """
-AvalancheLib
-------------
+BurstDetectLib
+--------------
 From Don
 
 Last update: 14 Feburary, 2024
