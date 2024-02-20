@@ -9,7 +9,7 @@ inh weights scale factor            = 1
 
 [Numerical settings]
 simulation duration (ms)            = 5000
-time step size (ms)                 = 0.05
+time step size (ms)                 = 0.02
 
 [Stochastic current]
 stochastic noise intensity          = 3

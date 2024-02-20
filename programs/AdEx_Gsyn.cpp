@@ -4,8 +4,8 @@
  * @brief numerically simulate the dynamics of a network of spiking neurons
  *        modelled by Adaptive Exponential integrate-and-fire model and
  *        connected by conductance-based synapses
- * @version 6
- * @date 2024-Feb-10
+ * @version 7
+ * @date 2024-Feb-20
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
  * 
  * Compile command:
@@ -26,7 +26,7 @@
 #endif
 
 
-std::string code_ver = "Version 6\nLast Update: 10 Feburary 2024\n";
+std::string code_ver = "Version 7\nLast Update: 20 Feburary 2024\n";
 std::string prog_info = "This program simulates the dynamics of a network\nof spiking neurons modelled by Adaptive Exponential\nintegrate-and-fire model and connected by\nconductance-based synapse model\n";
 
 namespace model_param
@@ -260,7 +260,9 @@ public:
     const bool        outConductanceINHSeries;
     const bool        outCurrentStochSeries;
 
-    Parameters(std::string filename, bool suppressConsoleMsg=false) :
+    const std::string program_name;
+
+    Parameters(std::string filename, std::string program_name, bool suppressConsoleMsg=false) :
         input_param(get_input_parameters(filename)),
 
         infile_weights(input_param[0]),
@@ -301,7 +303,9 @@ public:
         outCurrentSynapSeries((input_param[17] == "true") ? true : false),
         outConductanceEXCSeries((input_param[18] == "true") ? true : false),
         outConductanceINHSeries((input_param[19] == "true") ? true : false),
-        outCurrentStochSeries((input_param[20] == "true") ? true : false)
+        outCurrentStochSeries((input_param[20] == "true") ? true : false),
+
+        program_name(program_name)
 
     { if (!suppressConsoleMsg) { std::cout << "OKAY, parameters imported from \"" << filename << "\"\n"; }}
 
@@ -436,12 +440,13 @@ namespace fileio
                 ofs.open(par.outfile_info, std::ios::trunc);
                 ofs << code_ver << '\n'
                     << "------------------------------------------------------------\n"
+                    << "program name:\t\t\t" << par.program_name << '\n'
                     << "computation finished at: " << datetime_buf << '\n'
                     << "time elapsed: " << time_elapsed << " s\n\n"
                     << "[network and synaptic weights]" << '\n'
                     << "network file:\t\t\t" << par.infile_weights << '\n'
                     << "number of neurons:\t\t" << par.network_size << '\n'
-                    << "exc weight scale factor:\t" << par.weights_scale_factor_exc << "\n\n"
+                    << "exc weight scale factor:\t" << par.weights_scale_factor_exc << "\n"
                     << "inh weight scale factor:\t" << par.weights_scale_factor_inh << "\n\n"
                     << "[numerical settings]" << '\n'
                     << "time step size:\t\t\t" << par.stepsize << " ms" << '\n'
@@ -485,6 +490,7 @@ namespace fileio
         try {
             ofs.open(par.outfile_sett, std::ios::trunc);
             ofs << "{"
+                << "\"program_name\": " << "\"" << par.program_name << "\"" << ", "
                 << "\"network_file\": " << "\"" << par.infile_weights << "\"" << ", "
                 << "\"stimulus_file\": " << "\"" << par.infile_stimulus << "\"" << ", "
                 << "\"num_neuron\": " << par.network_size << ", "
@@ -526,8 +532,7 @@ namespace fileio
         ofs.exceptions(std::ofstream::failbit | std::ofstream::badbit);
         try {
             ofs.open(par.outfile_cont, std::ios::trunc);
-            ofs << ++continuation << '|' << par.outPotentialSeries << '|'
-                << par.outAdaptationSeries << '|' << par.outCurrentSynapSeries << '\n';
+            ofs << ++continuation << '|' << par.program_name << '\n';
             ofs << par.network_size << '|'
                 << par.stepsize << '|' << par.duration << '|'
                 << par.rng_seed << '|'
@@ -594,6 +599,7 @@ namespace fileio
 void display_info(Parameters &par)
 {
     std::cout << "---------------------------------------------\n"
+              << "|program name:            " << par.program_name << '\n'
               << "|synaptic weights file:   " << par.infile_weights << '\n'
               << "|number of neurons:       " << par.network_size << '\n'
               << "|exc weight scale factor: " << par.weights_scale_factor_exc << '\n'
@@ -755,7 +761,7 @@ int main(int argc, char **argv)
     int mode = 0;           // 0: overwrite mode | 1: continue mode (not implemented)
     int continuation = -1;  // count the number of times of continuation (not implemented)
 
-    Parameters par(IN_FNAME_PARAMETERS, suppressConsoleMsg);
+    Parameters par(IN_FNAME_PARAMETERS, argv[0], suppressConsoleMsg);
 
     CREATE_OUTPUT_DIRECTORY(OUT_FOLDER)
 
