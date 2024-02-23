@@ -3,6 +3,7 @@
  * @author likchun@outlook.com
  * @brief numerically simulate the dynamics of a network of spiking neurons
  *        modelled by Izhikevich's model and connected by conductance-based synapses
+ *        numerical scheme: weak order 2 Runge-Kutta
  * @version 7
  * @date 2024-Feb-20
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
@@ -888,7 +889,8 @@ int main(int argc, char **argv)
     if (par.outCurrentStochSeries && !suppressConsoleMsg) { std::cout << "Export stochastic current time series? YES\n"; }
 
     clock_t beg_sim = clock();
-
+    double current_stimu = 0;
+    double a, b, dv1, dv2, du1, du2, potential_0, recovery_0;
 
     /* Main calculation loop */
     while (now_step < total_step)
@@ -948,20 +950,28 @@ int main(int argc, char **argv)
 
             /* current, potential and recovery */
             current_synap[i] = (conductance_exc[i] * (model_param::Gsynap::V_E - potential[i]) + conductance_inh[i] * (model_param::Gsynap::V_I - potential[i]));
-
-            potential_prev = potential[i];  // membrane potential of previous step
-            current_stoch[i] = noise_intensity * norm_dist(random_generator) / sqrt_dt; // stochastic current
-            if (stimulus_series.size()==0) {
-                potential[i] += (0.04*potential[i]*potential[i]+5*potential[i]+140 - recovery[i] + current_synap[i] + current_const + current_stoch[i]) * dt;
+            current_stoch[i] = noise_intensity * norm_dist(random_generator) * sqrt_dt; // Brownian motion
+            if (!(stimulus_series.size()==0)) { current_stimu = stimulated_neuron_idx[i]*stimulus_series[now_step]; }
+            if (neuron_type[i] == -1) {
+                a = model_param::Izh::inh::a;
+                b = model_param::Izh::inh::b;
             } else {
-                potential[i] += (0.04*potential[i]*potential[i]+5*potential[i]+140 - recovery[i] + current_synap[i] + current_const + current_stoch[i] + stimulated_neuron_idx[i]*stimulus_series[now_step]) * dt;
+                a = model_param::Izh::exc::a;
+                b = model_param::Izh::exc::b;
             }
 
-            if (neuron_type[i] == -1) {
-                recovery[i] += model_param::Izh::inh::a * (model_param::Izh::inh::b * potential_prev - recovery[i]) * dt;
-            } else {
-                recovery[i] += model_param::Izh::exc::a * (model_param::Izh::exc::b * potential_prev - recovery[i]) * dt;
-        }}
+            // Weak Order 2 Runge-Kutta Method //
+            dv1 = 0.04*potential[i]*potential[i]+5*potential[i]+140 - recovery[i] + current_synap[i] + current_const + current_stimu;
+            du1 = a * (b * potential[i] - recovery[i]);
+
+            potential_0 = potential[i] + dv1 * dt + current_stoch[i];
+            recovery_0 = recovery[i] + du1 * dt;
+            dv2 = 0.04*potential_0*potential_0+5*potential_0+140 - recovery_0 + current_synap[i] + current_const + current_stimu;
+            du2 = a * (b * potential_0 - recovery_0);
+
+            potential[i] += (dv1+dv2)/2 * dt + current_stoch[i];
+            recovery[i] += (du1+du2)/2 * dt;
+        }
 
         /* Here, the membrane potential (and other variables) of all neurons
            in a step will be added to a buffer "voltage_time_series_buffer".
