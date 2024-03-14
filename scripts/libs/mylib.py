@@ -3,7 +3,7 @@ MyLib
 -----
 Tools & templates
 
-Last update: 18 Feb, 2024 (noon)
+Last update: 7 Mar, 2024 (pm)
 """
 
 import os
@@ -27,6 +27,13 @@ t_range_ = lambda duration_ms, stepsize_ms, transient_ms=0: np.arange(int(durati
 def load_spike_steps(filepath:str, delimiter='\t', incspkc=True):
     if incspkc: return np.array([np.array(x,dtype=int)[1:] for x in csv.reader(open(filepath,'r'),delimiter=delimiter)],dtype=object)
     else: return np.array([np.array(x,dtype=int) for x in csv.reader(open(filepath,'r'),delimiter=delimiter)],dtype=object)
+
+def load_spike_steps2(filepath:str, dtype=None):
+    try:
+        with open(filepath, "r") as file:
+            data = [np.fromstring(line.rstrip(), dtype=dtype, sep=" ") for line in file.readlines()]
+        return data
+    except FileNotFoundError: raise
 
 def save_spike_steps(spike_steps:np.ndarray, filepath:str, delimiter='\t', incspkc=True):
     with open(filepath,'w') as f:
@@ -70,8 +77,8 @@ def get_average_spike_rate_time_histogram(spike_steps:np.ndarray, stepsize_ms:fl
     - network average spike rate (number of spikes in time bin divided by bin size and number of neurons)\n
     units: s, Hz"""
     num_bin = int(duration_ms//binsize_ms)+1
-    numspike, binedge = np.histogram(np.hstack(spike_steps*stepsize_ms),np.linspace(0,binsize_ms*num_bin,num_bin))
-    return ((binedge[1:]+binedge[:-1])/2/1000)[:-1], (numspike/(binedge[1:]-binedge[:-1])*1000/spike_steps.size)[:-1] # remove the last bin, which cannot be fitted into the time interval for the given bin size
+    numspikes, binedges = np.histogram(np.hstack(spike_steps*stepsize_ms),np.linspace(0,binsize_ms*num_bin,num_bin))
+    return ((binedges[1:]+binedges[:-1])/2/1000)[:-1], (numspikes/(binedges[1:]-binedges[:-1])*1000/spike_steps.size)[:-1] # remove the last bin, which cannot be fitted into the time interval for the given bin size
 
 def get_average_spike_rate_time_curve(spike_steps:np.ndarray, stepsize_ms:float, duration_ms:float, kernelstd_ms:float):
     """Return a tuple:
@@ -96,6 +103,12 @@ def get_num_spiked_neuron_time_histogram(spike_steps:np.ndarray, stepsize_ms:flo
 def get_interspike_intervals(spike_steps:np.ndarray, stepsize_ms:float):
     """unit: s"""
     return np.array([np.diff(x)/1000 for x in spike_steps*stepsize_ms],dtype=object)
+
+def get_network_spike_times(spike_times:np.ndarray):
+    return np.unique(np.hstack(spike_times))
+
+def get_interevent_intervals(spike_times:np.ndarray):
+    return np.diff(get_network_spike_times(spike_times))
 
 def get_spike_train(spike_steps:np.ndarray, num_steps:int):
     spike_train = np.zeros((spike_steps.size,num_steps+1),dtype=int) # +1 to include the initial time step t0
@@ -162,15 +175,15 @@ def prob_dens(data:np.ndarray, binsize:float, min_val="auto", max_val="auto"):
     if start_from_max: bins = np.linspace(max_val-num_bin*binsize-binsize/2, max_val+binsize/2, num_bin+1)
     elif start_from_max and start_from_min: bins = np.linspace(min_val-binsize/2, max_val+binsize/2, num_bin+1)
     else: bins = np.linspace(min_val-binsize/2, min_val+num_bin*binsize+binsize/2, num_bin+1)
-    density, binedge = np.histogram(data, bins=bins, density=True)
-    return (binedge[1:]+binedge[:-1])/2, density
+    densities, binedges = np.histogram(data, bins=bins, density=True)
+    return (binedges[1:]+binedges[:-1])/2, densities
 
 def prob_dens_CustomBin(data:np.ndarray, bins:np.ndarray):
     """Return a tuple:\n
     - mid-point of bins
     - probability density"""
-    density, binedge = np.histogram(data, bins=bins, density=True)
-    return (binedge[1:]+binedge[:-1])/2, density
+    densities, binedges = np.histogram(data, bins=bins, density=True)
+    return (binedges[1:]+binedges[:-1])/2, densities
 
 def cumu_dens(data:np.ndarray):
     """Return a tuple:\n
@@ -178,6 +191,61 @@ def cumu_dens(data:np.ndarray):
     - cumulative probability density"""
     data_sorted = np.sort(data)
     return np.concatenate([data_sorted,data_sorted[[-1]]]), np.arange(data_sorted.size+1)
+
+def get_linbins(min_max_val:tuple[float,float], binsize=None, num_bin=None, return_xcenters=False):
+    min_val, max_val = min_max_val
+    if num_bin is None: num_bin = int((max_val-min_val)/binsize)
+    binedges = np.linspace(min_val, max_val, num_bin)
+    if return_xcenters: return binedges, (binedges[1:]+binedges[:-1])/2
+    else: return binedges
+
+def get_logbins(min_max_val=None, data=None, binsize=None, num_bin=None, return_xcenters=False):
+    """`binsize` in log-scale.\n
+    Return an array or a tuple:\n
+    - bin edges
+    - mid-point of bins (if `return_xcenters` = `True`)\n
+    Note:
+    - specify either `min_max_val` or `data` only
+    - specify either `num_bin` or `binsize` only"""
+    if data is not None and min_max_val is None:
+        vmin, vmax = np.log10(data.min()), np.log10(data.max())
+    elif min_max_val is not None and data is None:
+        vmin, vmax = np.log10(min_max_val[0]), np.log10(min_max_val[1])
+    else: raise ValueError("specify either data or vlim only")
+    if num_bin is not None and binsize is None:
+        binsize = (vmax-vmin) / num_bin
+    elif binsize is not None and num_bin is None:
+        num_bin = np.floor((vmax-vmin) / binsize).astype(int)
+    else: raise ValueError("specify either num_bin or binsize only")
+    bin_min, bin_max = vmin - binsize/2, vmax + binsize/2
+    binedges = 10**np.arange(bin_min, bin_max+binsize, binsize)
+    if return_xcenters:
+        xcenters = np.sqrt(binedges[:-1]*binedges[1:])
+        return binedges, xcenters
+    return binedges
+
+def get_linlogbins(min_max_val:tuple[float,float], linbinsize:float, logbinsize:float, return_xcenters=False, print_cutoff=False):
+    """Linear-bins are used when binsize of log-bins is smaller than that of linear-bins.
+    The linear-log-bins cutoff value depends on `linbinsize` and `logbinsize`. `logbinsize` in log-scale.\n
+    Set `print_cutoff` = `True` to show the linear-log bin cutoff value.\n
+    Return an array or a tuple:\n
+    - bin edges
+    - xcenters of linear-bins and log-bins (if `return_xcenters` = `True`)\n
+    """
+    min_val, max_val = min_max_val
+    linbins, xmidpts = get_linbins(min_max_val=(min_val,max_val), binsize=linbinsize, return_xcenters=True)
+    logbins, xcenters = get_logbins(min_max_val=(min_val,max_val), binsize=logbinsize, return_xcenters=True)
+    linlogbin_cutoff = linbinsize
+    logbinsize_s = np.diff(logbins)
+    cut_logbins = logbins[np.argmax(logbinsize_s >= linlogbin_cutoff):]
+    cut_xcenters = xcenters[np.argmax(logbinsize_s >= linlogbin_cutoff):]
+    cut_linbins = linbins[np.argwhere(linbins < cut_logbins[0]).flat]
+    cut_xmidpts = xmidpts[np.argwhere(linbins < cut_logbins[0]).flat][:-1]
+    cut_logbins *= 10**logbinsize / (cut_logbins[0] / cut_linbins[-1])
+    cut_xcenters = np.sqrt(cut_logbins[:-1]*cut_logbins[1:])
+    if print_cutoff: print("linear-log bin cutoff: {}".format((cut_linbins[-1]+cut_logbins[0])/2))
+    if return_xcenters: return np.hstack((cut_linbins,cut_logbins)), np.hstack((cut_xmidpts,(cut_linbins[-1]+cut_logbins[0])/2,cut_xcenters))
+    else: return np.hstack((cut_linbins,cut_logbins))
 
 def break_at_discontinuity(sequence:np.ndarray, lower_discont:float, upper_discont:float, threshold=.999):
     sequence = sequence.copy()
@@ -450,39 +518,51 @@ class NeuronalDynamics:
             self._num_step_end_trim = 0
             self._v_filepath = potential_filepath
             self._u_filepath = adaptation_filepath
-            self._synapi_filepath = synap_current_filepath
+            self._isyn_filepath = synap_current_filepath
             self._ge_filepath = conductance_exc_filepath
             self._gi_filepath = conductance_inh_filepath
-            self._stochi_filepath = stoch_current_filepath
+            self._istc_filepath = stoch_current_filepath
 
         @property
         def membrane_potential(self):
-            try: return load_time_series(self._v_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+            try:
+                x = load_time_series(self._v_filepath, num_neuron=self._num_neuron)
+                return x[:,self._num_step_beg_trim:x.shape[1]-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no membrane potential series file \"{}\"".format(self._v_filepath))
 
         @property
         def recovery_variable(self):
-            try: return load_time_series(self._u_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+            try:
+                x = load_time_series(self._u_filepath, num_neuron=self._num_neuron)
+                return x[:,self._num_step_beg_trim:x.shape[1]-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no recovery variable series file \"{}\"".format(self._u_filepath))
 
         @property
         def presynaptic_current(self):
-            try: return load_time_series(self._synapi_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+            try:
+                x = load_time_series(self._isyn_filepath, num_neuron=self._num_neuron)
+                return x[:,self._num_step_beg_trim:x.shape[1]-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no presynaptic current series file \"{}\"".format(self._synapi_filepath))
 
         @property
         def conductance_exc(self):
-            try: return load_time_series(self._ge_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+            try:
+                x = load_time_series(self._ge_filepath, num_neuron=self._num_neuron)
+                return x[:,self._num_step_beg_trim:x.shape[1]-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no presynaptic EXC conductance series file \"{}\"".format(self._ge_filepath))
 
         @property
         def conductance_inh(self):
-            try: return load_time_series(self._gi_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+            try:
+                x = load_time_series(self._gi_filepath, num_neuron=self._num_neuron)
+                return x[:,self._num_step_beg_trim:x.shape[1]-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no presynaptic INH conductance series file \"{}\"".format(self._gi_filepath))
 
         @property
         def stochastic_current(self):
-            try: return load_time_series(self._stochi_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+            try:
+                x = load_time_series(self._istc_filepath, num_neuron=self._num_neuron)[:,self._num_step_beg_trim:-self._num_step_end_trim]
+                return x[:,self._num_step_beg_trim:x.shape[1]-self._num_step_end_trim]
             except FileNotFoundError: print("warning: no stochastic current series file \"{}\"".format(self._stochi_filepath))
 
         def set_trim_duration(self, trim_beg_t_ms:float, trim_end_t_ms:float, stepsize_ms:float):
@@ -507,14 +587,26 @@ class QuickGraph:
         return label,count
 
     def prob_dens_plot(self, data, binsize:float, ax=None, plotZero=True, min_val="auto", max_val="auto", **options):
-        xbin,probdens = prob_dens(np.hstack(data).flatten(), binsize, min_val, max_val)
+        xcenters,probdens = prob_dens(np.hstack(data).flatten(), binsize, min_val, max_val)
+        if not plotZero: xcenters[np.argwhere(probdens==0)] = np.nan # remove zero densities
+        if not plotZero: probdens[np.argwhere(probdens==0)] = np.nan # remove zero densities
         if ax is not None:
-            if not plotZero: xbin[np.argwhere(probdens==0)] = np.nan # remove zero densities
-            if not plotZero: probdens[np.argwhere(probdens==0)] = np.nan # remove zero densities
-            ax.plot(xbin, probdens, **options)
+            ax.plot(xcenters, probdens, **options)
             ax.set_axisbelow(True)
             ax.grid(True)
-        return xbin, probdens
+        return xcenters, probdens
+
+    def prob_dens_plot_CustomBins(self, data, bins, ax=None, xcenters=None, plotZero=True, **options):
+        _xcenters,probdens = prob_dens_CustomBin(np.hstack(data).flatten(), bins=bins)
+        if xcenters is not None:
+            _xcenters = xcenters
+        if not plotZero: _xcenters[np.argwhere(probdens==0)] = np.nan # remove zero densities
+        if not plotZero: probdens[np.argwhere(probdens==0)] = np.nan # remove zero densities
+        if ax is not None:
+            ax.plot(_xcenters, probdens, **options)
+            ax.set_axisbelow(True)
+            ax.grid(True)
+        return _xcenters, probdens
 
     def cumu_dens_plot(self, data, ax=None, likelihood=False, **options):
         """`likelihood`: if True, y-axis is the \"likelihood of occurrence\", otherwise \"number of occurrence\""""
@@ -587,8 +679,7 @@ class QuickGraph:
 
     def multiple_formatter(self, denominator=2, number=np.pi, latex="\pi"):
         def gcd(a, b):
-            while b:
-                a, b = b, a%b
+            while b: a, b = b, a%b
             return a
         def _multiple_formatter(x, pos):
             den = denominator
@@ -596,21 +687,14 @@ class QuickGraph:
             com = gcd(num,den)
             (num,den) = (int(num/com),int(den/com))
             if den==1:
-                if num==0:
-                    return r'$0$'
-                if num==1:
-                    return r'$%s$'%latex
-                elif num==-1:
-                    return r'$-%s$'%latex
-                else:
-                    return r'$%s%s$'%(num,latex)
+                if num==0: return r'$0$'
+                if num==1: return r'$%s$'%latex
+                elif num==-1: return r'$-%s$'%latex
+                else: return r'$%s%s$'%(num,latex)
             else:
-                if num==1:
-                    return r'$\frac{%s}{%s}$'%(latex,den)
-                elif num==-1:
-                    return r'$\frac{-%s}{%s}$'%(latex,den)
-                else:
-                    return r'$\frac{%s%s}{%s}$'%(num,latex,den)
+                if num==1: return r'$\frac{%s}{%s}$'%(latex,den)
+                elif num==-1: return r'$\frac{-%s}{%s}$'%(latex,den)
+                else: return r'$\frac{%s%s}{%s}$'%(num,latex,den)
         return _multiple_formatter
     class Multiple:
         def __init__(self, denominator=2, number=np.pi, latex="\pi"):
@@ -663,12 +747,14 @@ class NeuroData:
             - `current_stoch`: bool
         """
         self._compatibility()
+        self._suppress_warning = True
         self.network = NeuronalNetwork()
         self._netFound = False
         try: self.network.adjacency_matrix_from_file(self.configs["network_file"]); self._netFound = True
         except FileNotFoundError:
             try: self.network.adjacency_matrix_from_file(os.path.join(directory,self.configs["network_file"])); self._netFound = True
-            except FileNotFoundError: print("Warning: network file not found. \"network\" functions cannot be used. Note: to access the network file, put it into the same the directory as this script.")
+            except FileNotFoundError:
+                if not self._suppress_warning: print("Warning: network file not found. \"network\" functions cannot be used. Note: to access the network file, put it into the same the directory as this script.")
         if self._netFound:
             self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor_exc"], neuron_type="exc")
             self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor_inh"], neuron_type="inh")
@@ -744,10 +830,35 @@ qgraph.config_font("avenir")
 
 
 """
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+QUICK COPY
+----------
+### imports ###
+from mylib import NeuroData, qgraph
+from matplotlib import pyplot as plt
+import numpy as np
 
+
+### start ###
+directory = "/Users/likchun/NeuroProject/raw_data/net_unifindeg_constwij/spontaneous/0.2,0.2,3"
+nd = NeuroData(directory)
+
+fig, ax = plt.subplots(figsize=(5,5))
+fig, axes = plt.subplots(3, 2, figsize=(10,5), sharex=True, sharey=True)
 gridspec_kw={"width_ratios":[.7,1]}
 
+
+### legend size and location ###
+# Shrink current axis by 20%
+box = ax.get_position()
+ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+
+# Put a legend to the right outside of the current axis
+ax.legend(loc="center left", bbox_to_anchor=(1,0.5))
+
+
+
+### figures in grid ###
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 fig = plt.figure(figsize=(15,15))
 gs = fig.add_gridspec(nrows=3, ncols=4,height_ratios=[4,1,1],width_ratios=[1,1,1,1],hspace=.5)

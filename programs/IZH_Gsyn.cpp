@@ -5,7 +5,7 @@
  *        modelled by Izhikevich's model and connected by conductance-based synapses
  *        numerical scheme: weak order 2 Runge-Kutta
  * @version 7
- * @date 2024-Feb-20
+ * @date 2024-Mar-14
  * @note to be compiled in C++ version 11 or later with boost library 1.78.0
  * 
  * Compile command:
@@ -26,7 +26,7 @@
 #endif
 
 
-std::string code_ver = "Version 7\nLast Update: 20 Feburary 2024\n";
+std::string code_ver = "Version 7\nLast Update: 14 March 2024\n";
 std::string prog_info = "This program simulates the dynamics of a network\nof spiking neurons modelled by Izhikevich's model\nand connected by conductance-based synapse model\n";
 
 namespace model_param
@@ -233,8 +233,10 @@ public:
     const double init_potential;
     const double init_recovery;
 
-    const double trunc_time_inh;
-    const double trunc_time_exc;
+    const double spiketrig_adap_scale_factor_exc;
+    const double spiketrig_adap_scale_factor_inh;
+    const double subthresh_adap_scale_factor_exc;
+    const double subthresh_adap_scale_factor_inh;
 
     const std::string outfile_info;
     const std::string outfile_sett;
@@ -253,6 +255,9 @@ public:
     const bool        outConductanceEXCSeries;
     const bool        outConductanceINHSeries;
     const bool        outCurrentStochSeries;
+
+    const double trunc_time_exc;
+    const double trunc_time_inh;
 
     const std::string program_name;
 
@@ -278,8 +283,10 @@ public:
         init_potential(stod(input_param[11])),
         init_recovery(stod(input_param[12])),
 
-        trunc_time_inh(stod(input_param[13])),
-        trunc_time_exc(stod(input_param[14])),
+        spiketrig_adap_scale_factor_exc(stod(input_param[13])),
+        spiketrig_adap_scale_factor_inh(stod(input_param[14])),
+        subthresh_adap_scale_factor_exc(stod(input_param[15])),
+        subthresh_adap_scale_factor_inh(stod(input_param[16])),
 
         outfile_info(OUT_FNAME_INFO),
         outfile_sett(OUT_FNAME_SETTINGS),
@@ -292,12 +299,15 @@ public:
         outfile_conductance_inh_series(OUT_FNAME_CONDUCTANCE_INH_SERIES),
         outfile_current_stoch_series(OUT_FNAME_CURRENT_STOCH_SERIES),
 
-        outPotentialSeries((input_param[15] == "true") ? true : false),
-        outRecoverySeries((input_param[16] == "true") ? true : false),
-        outCurrentSynapSeries((input_param[17] == "true") ? true : false),
-        outConductanceEXCSeries((input_param[18] == "true") ? true : false),
-        outConductanceINHSeries((input_param[19] == "true") ? true : false),
-        outCurrentStochSeries((input_param[20] == "true") ? true : false),
+        outPotentialSeries((input_param[17] == "true") ? true : false),
+        outRecoverySeries((input_param[18] == "true") ? true : false),
+        outCurrentSynapSeries((input_param[19] == "true") ? true : false),
+        outConductanceEXCSeries((input_param[20] == "true") ? true : false),
+        outConductanceINHSeries((input_param[21] == "true") ? true : false),
+        outCurrentStochSeries((input_param[22] == "true") ? true : false),
+
+        trunc_time_exc(stod(input_param[23])),
+        trunc_time_inh(stod(input_param[24])),
 
         program_name(program_name)
 
@@ -434,9 +444,9 @@ namespace fileio
                 ofs.open(par.outfile_info, std::ios::trunc);
                 ofs << code_ver << '\n'
                     << "------------------------------------------------------------\n"
-                    << "program name:\t\t\t" << par.program_name << '\n'
                     << "computation finished at: " << datetime_buf << '\n'
                     << "time elapsed: " << time_elapsed << " s\n\n"
+                    << "program name: " << par.program_name << '\n'
                     << "[network and synaptic weights]" << '\n'
                     << "network file:\t\t\t" << par.infile_weights << '\n'
                     << "number of neurons:\t\t" << par.network_size << '\n'
@@ -452,8 +462,17 @@ namespace fileio
                     << "stimulus file:\t\t\t" << par.infile_stimulus << "\n\n"
                     << "[initial values]\n"
                     << "membrane potential:\t\t" << par.init_potential << " mV" << '\n'
-                    << "recovery variable:\t\t" << par.init_recovery << "\n\n"
-                    << "[other settings]" << '\n'
+                    << "recovery variable:\t\t" << par.init_recovery << "\n\n";
+                if ((par.spiketrig_adap_scale_factor_exc!=1) && (par.spiketrig_adap_scale_factor_inh!=1)) {
+                    ofs << "spike-triggered adaptation:"
+                        << "- scale factor (exc):\t\t" << par.spiketrig_adap_scale_factor_exc << '\n'
+                        << "- scale factor (inh):\t\t" << par.spiketrig_adap_scale_factor_inh << '\n';
+                } if ((par.subthresh_adap_scale_factor_exc!=1) && (par.subthresh_adap_scale_factor_inh!=1)) {
+                    ofs << "subthreshold adaptation:"
+                        << "- scale factor (exc):\t\t" << par.subthresh_adap_scale_factor_exc << '\n'
+                        << "- scale factor (inh):\t\t" << par.subthresh_adap_scale_factor_inh << '\n';
+                }
+                ofs << "[other settings]" << '\n'
                     << "spike truncation time:\t\t" << trunc_step_inh*par.stepsize << " ms" << " (inh)\n"
                     << "spike truncation time:\t\t" << trunc_step_exc*par.stepsize << " ms" << " (exc)\n"
                     << std::endl;
@@ -488,17 +507,21 @@ namespace fileio
                 << "\"network_file\": " << "\"" << par.infile_weights << "\"" << ", "
                 << "\"stimulus_file\": " << "\"" << par.infile_stimulus << "\"" << ", "
                 << "\"num_neuron\": " << par.network_size << ", "
-                << "\"weightscale_factor_exc\": " << par.weights_scale_factor_exc << ", "
-                << "\"weightscale_factor_inh\": " << par.weights_scale_factor_inh << ", "
+                << "\"weight_scale_exc\": " << par.weights_scale_factor_exc << ", "
+                << "\"weight_scale_inh\": " << par.weights_scale_factor_inh << ", "
                 << "\"stepsize_ms\": " << par.stepsize << ", "
                 << "\"duration_ms\": " << par.duration << ", "
                 << "\"noise_intensity\": " << par.noise_intensity << ", "
                 << "\"rng_seed\": " << par.rng_seed << ", "
                 << "\"const_current\": " << par.current_const << ", "
-                << "\"exp_trunc_step_inh\": " << trunc_step_inh << ", "
-                << "\"exp_trunc_step_exc\": " << trunc_step_exc << ", "
                 << "\"init_potential\": " << par.init_potential << ", "
                 << "\"init_recovery\": " << par.init_recovery << ", "
+                << "\"spiketrig_adap_scale_exc\": " << par.spiketrig_adap_scale_factor_exc << ", "
+                << "\"spiketrig_adap_scale_inh\": " << par.spiketrig_adap_scale_factor_inh << ", "
+                << "\"subthresh_adap_scale_exc\": " << par.subthresh_adap_scale_factor_exc << ", "
+                << "\"subthresh_adap_scale_inh\": " << par.subthresh_adap_scale_factor_inh << ", "
+                << "\"exp_trunc_step_inh\": " << trunc_step_inh << ", "
+                << "\"exp_trunc_step_exc\": " << trunc_step_exc << ", "
                 << "\"data_series_export\": "
                     << "{"
                     << "\"potential\": " << (par.outPotentialSeries ? "true" : "false") << ", "
@@ -529,11 +552,12 @@ namespace fileio
             ofs << ++continuation << '|' << par.program_name << '\n';
             ofs << par.network_size << '|'
                 << par.stepsize << '|' << par.duration << '|'
-                << par.rng_seed << '|'
-                << par.noise_intensity << '|'
-                << trunc_step_inh << '|' << trunc_step_exc << '|'
-                << par.weights_scale_factor_exc << '|' << par.weights_scale_factor_inh << '|';
-            ofs << '|';
+                << par.rng_seed << '|' << par.noise_intensity << '|'
+                << par.weights_scale_factor_exc << '|' << par.weights_scale_factor_inh << '|'
+                << par.spiketrig_adap_scale_factor_exc << '|' << par.spiketrig_adap_scale_factor_inh << '|'
+                << par.subthresh_adap_scale_factor_exc << '|' << par.subthresh_adap_scale_factor_inh << '|'
+                << trunc_step_inh << '|' << trunc_step_exc << '|';
+            ofs << '\n';
             ofs << par.init_potential << '|' << par.init_recovery << '|'
                 << model_param::Izh::exc::a << '|' << model_param::Izh::exc::b << '|'
                 << model_param::Izh::exc::c << '|' << model_param::Izh::exc::d << '|'
@@ -671,7 +695,7 @@ void scale_synaptic_weights(Parameters &par, std::vector<std::vector<double>> &s
    inhibitory (excitatory) presynaptic neuron directing into the
    (i+1)th neuron. Useful for speeding up the calculation. */
 void create_inlink_reference(std::vector<std::vector<double>> &synaptic_weights,
-    std::vector<std::vector<int>> &inhibitory_links_index, std::vector<std::vector<int>> &excitatory_links_index)
+    std::vector<std::vector<int>> &excitatory_links_index, std::vector<std::vector<int>> &inhibitory_links_index)
 {
     std::vector<int> _inh_temp, _exc_temp;
     for (size_t i = 0; i < synaptic_weights.size(); i++) {
@@ -690,7 +714,7 @@ void create_inlink_reference(std::vector<std::vector<double>> &synaptic_weights,
    precision of floating point number / double as a reference to determine
    the threshold of truncation steps that gives accurate results. */
 void setup_truncation_step(Parameters &par, std::vector<std::vector<double>> &synaptic_weights,
-    int &trunc_step_inh, int &trunc_step_exc)
+    int &trunc_step_exc, int &trunc_step_inh)
 {
     double w_inh = 0, w_inh_max = 0, w_exc = 0, w_exc_max = 0;
     for (size_t i = 0; i < synaptic_weights.size(); i++) {
@@ -722,8 +746,8 @@ void setup_truncation_step(Parameters &par, std::vector<std::vector<double>> &sy
 /* Create a look-up table for the exponential spike decay factors.
    Avoid calculating the expensive and redundant exponential function
    multiple times. */
-void setup_exp_lookup_table(Parameters &par, std::vector<double> &spike_exp_inh,
-    std::vector<double> &spike_exp_exc, int &trunc_step_inh, int &trunc_step_exc)
+void setup_exp_lookup_table(Parameters &par, std::vector<double> &spike_exp_exc,
+    std::vector<double> &spike_exp_inh, int &trunc_step_exc, int &trunc_step_inh)
 {
     spike_exp_inh = std::vector<double>(trunc_step_inh);
     for (int i = 0; i < static_cast<int>(spike_exp_inh.size()); ++i) {
@@ -769,12 +793,12 @@ int main(int argc, char **argv)
     classify_neuron_type(par.network_size, synaptic_weights, neuron_type);
     get_indegree(par.network_size, synaptic_weights, indegree);
     scale_synaptic_weights(par, synaptic_weights);
-    create_inlink_reference(synaptic_weights, inh_links_idx, exc_links_idx);
+    create_inlink_reference(synaptic_weights, exc_links_idx, inh_links_idx);
 
     int	trunc_step_inh, trunc_step_exc;
     std::vector<double> spike_exp_inh, spike_exp_exc;
-    setup_truncation_step(par, synaptic_weights, trunc_step_inh, trunc_step_exc);
-    setup_exp_lookup_table(par, spike_exp_inh, spike_exp_exc, trunc_step_inh, trunc_step_exc);
+    setup_truncation_step(par, synaptic_weights, trunc_step_exc, trunc_step_inh);
+    setup_exp_lookup_table(par, spike_exp_exc, spike_exp_inh, trunc_step_exc, trunc_step_inh);
     double spike_contribution_sum, potential_prev;
 
     const double dt = par.stepsize;
@@ -891,6 +915,10 @@ int main(int argc, char **argv)
     clock_t beg_sim = clock();
     double current_stimu = 0;
     double a, b, dv1, dv2, du1, du2, potential_0, recovery_0;
+    double lmbd_dE = par.spiketrig_adap_scale_factor_exc;
+    double lmbd_dI = par.spiketrig_adap_scale_factor_inh;
+    double lmbd_bE = par.subthresh_adap_scale_factor_exc;
+    double lmbd_bI = par.subthresh_adap_scale_factor_inh;
 
     /* Main calculation loop */
     while (now_step < total_step)
@@ -910,10 +938,10 @@ int main(int argc, char **argv)
             if (potential[i] >= model_param::Izh::V_s) {
                 if (neuron_type[i] == -1) {
                     potential[i] = model_param::Izh::inh::c;
-                    recovery[i] += model_param::Izh::inh::d;
+                    recovery[i] += model_param::Izh::inh::d * lmbd_dI;
                 } else {
                     potential[i] = model_param::Izh::exc::c;
-                    recovery[i] += model_param::Izh::exc::d;
+                    recovery[i] += model_param::Izh::exc::d * lmbd_dE;
                 }
                 spike_timesteps[i].push_back(now_step);
                 justSpiked[i] = 1;
@@ -954,10 +982,10 @@ int main(int argc, char **argv)
             if (!(stimulus_series.size()==0)) { current_stimu = stimulated_neuron_idx[i]*stimulus_series[now_step]; }
             if (neuron_type[i] == -1) {
                 a = model_param::Izh::inh::a;
-                b = model_param::Izh::inh::b;
+                b = model_param::Izh::inh::b * lmbd_bI;
             } else {
                 a = model_param::Izh::exc::a;
-                b = model_param::Izh::exc::b;
+                b = model_param::Izh::exc::b * lmbd_bE;
             }
 
             // Weak Order 2 Runge-Kutta Method //

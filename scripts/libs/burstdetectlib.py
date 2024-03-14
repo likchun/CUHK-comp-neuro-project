@@ -157,7 +157,7 @@ def get_burst_ranges_list(dt, steps_list, max_cutoff, bin_width, min_void, min_b
     logisis_all = np.hstack(logisis_list)
     if len(logisis_all) and not fix_max_cutoff:
         vmin, vmax = logisis_all.min(), logisis_all.max()
-        bin_min, bin_max = vmin - bin_width/2, vmax + bin_width/2
+        bin_min, bin_max = vmin - bin_width*5/2, vmax + bin_width*5/2
         bins = np.arange(bin_min, bin_max + bin_width, bin_width)
         centers =  (bins[:-1] + bins[1:])/2
         histogram_all = np.histogram(logisis_all, bins, density=True)[0].astype(float)
