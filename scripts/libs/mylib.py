@@ -3,19 +3,24 @@ MyLib
 -----
 Tools & templates
 
-Last update: 7 Mar, 2024 (pm)
+Last update: 10 Mar, 2024 (pm)
 """
 
 import os
 import csv
 import math
+import json
 import yaml
 import itertools
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from powerlaw import Fit
 from matplotlib import pyplot as plt
-from scipy import signal
 from scipy import ndimage
+from scipy import signal
+from scipy import stats
 
 MAXVAL_uint16_t = 65535
 MAXVAL_uint8_t = 255
@@ -104,11 +109,14 @@ def get_interspike_intervals(spike_steps:np.ndarray, stepsize_ms:float):
     """unit: s"""
     return np.array([np.diff(x)/1000 for x in spike_steps*stepsize_ms],dtype=object)
 
-def get_network_spike_times(spike_times:np.ndarray):
-    return np.unique(np.hstack(spike_times))
+def get_network_spike_times(spike_steps:np.ndarray, stepsize_ms:float):
+    return np.unique(np.hstack(spike_steps))*stepsize_ms
 
-def get_interevent_intervals(spike_times:np.ndarray):
-    return np.diff(get_network_spike_times(spike_times))
+def get_interevent_intervals(spike_steps:np.ndarray, stepsize_ms:float):
+    return np.diff(get_network_spike_times(spike_steps, stepsize_ms))
+
+def get_interevent_intervals_insteps(spike_steps:np.ndarray):
+    return np.diff(np.unique(np.hstack(spike_steps)))
 
 def get_spike_train(spike_steps:np.ndarray, num_steps:int):
     spike_train = np.zeros((spike_steps.size,num_steps+1),dtype=int) # +1 to include the initial time step t0
@@ -118,6 +126,19 @@ def get_spike_train(spike_steps:np.ndarray, num_steps:int):
 def trim_spike_steps(spike_steps:np.ndarray, start_t_ms:float, end_t_ms:float, stepsize_ms:float):
     """Return spike steps"""
     return np.array([np.array(ss[np.where((start_t_ms/stepsize_ms < np.array(ss)) & (np.array(ss) < end_t_ms/stepsize_ms))], dtype=int) for ss in spike_steps], dtype=object)
+
+
+def get_C_measure(binsize_ms:float, spike_steps:np.ndarray, stepsize_ms:float, duration_ms:float):
+    boolmask = [False if s.size!=0 else True for s in spike_steps]
+    num_bin = int(duration_ms//binsize_ms)+1
+    bins = np.linspace(0,binsize_ms*num_bin,num_bin)
+    numspike, binedge = np.histogram(np.hstack(spike_steps*stepsize_ms), bins)
+    avgfr = (numspike/(binedge[1:]-binedge[:-1])*1000/spike_steps.size)[:-1]
+    numspikes = np.array([np.histogram(np.hstack(spike_steps[i]*stepsize_ms), bins)[0] if spike_steps[i].size!=0 else np.zeros(numspike.size) for i in range(spike_steps.size)])
+    fr = (numspikes/(binedge[1:]-binedge[:-1])*1000)[:,:-1]
+
+    m1, m2 = [fr[i].mean() for i in range(spike_steps.size)], avgfr.mean()
+    return np.array([( np.dot(avgfr,fr[i]) / avgfr.size - m1[i]*m2 ) / ( np.sqrt(np.mean((fr[i]-m1[i])**2)) * np.sqrt(np.mean((avgfr-m2)**2)) ) for i in range(spike_steps.size)])
 
 
 
@@ -243,8 +264,8 @@ def get_linlogbins(min_max_val:tuple[float,float], linbinsize:float, logbinsize:
     cut_xmidpts = xmidpts[np.argwhere(linbins < cut_logbins[0]).flat][:-1]
     cut_logbins *= 10**logbinsize / (cut_logbins[0] / cut_linbins[-1])
     cut_xcenters = np.sqrt(cut_logbins[:-1]*cut_logbins[1:])
-    if print_cutoff: print("linear-log bin cutoff: {}".format((cut_linbins[-1]+cut_logbins[0])/2))
-    if return_xcenters: return np.hstack((cut_linbins,cut_logbins)), np.hstack((cut_xmidpts,(cut_linbins[-1]+cut_logbins[0])/2,cut_xcenters))
+    if print_cutoff: print("linear-log bin cutoff: {:5f} ms".format((cut_linbins[-1]+cut_logbins[0])/2))
+    if return_xcenters: return np.hstack([cut_linbins,cut_logbins]), np.hstack([cut_xmidpts,(cut_linbins[-1]+cut_logbins[0])/2,cut_xcenters])
     else: return np.hstack((cut_linbins,cut_logbins))
 
 def break_at_discontinuity(sequence:np.ndarray, lower_discont:float, upper_discont:float, threshold=.999):
@@ -452,9 +473,13 @@ class NeuronalDynamics:
         self._spike_count = None
         self._mean_spike_rate = None
         self._interspike_intervals = None
+        self._network_spike_times = None
+        self._interevent_intervals = None
+        self._interevent_intervals_insteps = None
         self._avg_spike_rate_binned = None
         self._avg_spike_rate_gauskern = None
         self.time_series = None
+        self.analysis = None
 
     def _reset_all(self):
         self._spike_times = None
@@ -462,9 +487,11 @@ class NeuronalDynamics:
         self._spike_count = None
         self._mean_spike_rate = None
         self._interspike_intervals = None
+        self._network_spike_times = None
+        self._interevent_intervals = None
+        self._interevent_intervals_insteps = None
         self._avg_spike_rate_binned = None
         self._avg_spike_rate_gauskern = None
-        # self.time_series = None
 
     @property
     def spike_steps(self): return self._spike_steps
@@ -474,6 +501,7 @@ class NeuronalDynamics:
 
     @property
     def spike_times(self):
+        """time scale: milliseconds (ms)"""
         if self._spike_times is None: self._spike_times = self._spike_steps*self._stepsize_ms
         return self._spike_times
 
@@ -489,18 +517,40 @@ class NeuronalDynamics:
 
     @property
     def mean_spike_rate(self):
+        """frequency scale: Hertz (Hz)"""
         if self._mean_spike_rate is None: self._mean_spike_rate = get_mean_spike_rate(self._spike_steps,self._duration_ms)
         return self._mean_spike_rate
 
     @property
     def interspike_intervals(self):
+        """time scale: seconds (s)"""
         if self._interspike_intervals is None: self._interspike_intervals = get_interspike_intervals(self._spike_steps,self._stepsize_ms)
         return self._interspike_intervals
 
+    @property
+    def network_spike_times(self):
+        """time scale: milliseconds (ms)"""
+        if self._network_spike_times is None: self._network_spike_times = get_network_spike_times(self._spike_steps, self._stepsize_ms)
+        return self._network_spike_times
+
+    @property
+    def interevent_intervals(self):
+        """time scale: milliseconds (ms)"""
+        if self._interevent_intervals is None: self._interevent_intervals = get_interevent_intervals(self._spike_steps, self._stepsize_ms)
+        return self._interevent_intervals
+
+    @property
+    def interevent_intervals_insteps(self):
+        """time scale: milliseconds (ms)"""
+        if self._interevent_intervals_insteps is None: self._interevent_intervals_insteps = get_interevent_intervals_insteps(self._spike_steps)
+        return self._interevent_intervals_insteps
+
     def average_spike_rate_time_histogram(self, binsize_ms:float):
+        """time scale: seconds (s), frequency scale: Hertz (Hz)"""
         return get_average_spike_rate_time_histogram(self._spike_steps,self._stepsize_ms,self._duration_ms,binsize_ms)
 
     def average_spike_rate_time_curve(self, kernelstd_ms:float):
+        """time scale: seconds (s), frequency scale: Hertz (Hz)"""
         return get_average_spike_rate_time_curve(self._spike_steps,self._stepsize_ms,self._duration_ms,kernelstd_ms)
 
     class _time_series_handler:
@@ -574,6 +624,39 @@ class NeuronalDynamics:
             conductance_inh="gcdi.bin", synap_current="curr.bin", stoch_current="stoc.bin"):
         self.time_series = self._time_series_handler(num_neuron, directory, potential, adaptation,
             conductance_exc, conductance_inh, synap_current, stoch_current)
+
+    def init_data_analysis(self):
+        self.analysis = self._analysis(self)
+
+    class _analysis:
+
+        def __init__(self, outer_instance):
+            self.outer = outer_instance
+
+        def C_measure(self, binsize_ms:float):
+            return get_C_measure(binsize_ms, self.outer._spike_steps, self.outer._stepsize_ms, self.outer._duration_ms)
+
+        @property
+        def KS_test_results(self):
+            """Load the K-S test info and K-S test results for different xmax as a tuple:
+            - `ks_test_info`: dict (json)
+                - `fit_type`: str, can be `powerlaw`, `exp`
+                - `KS`: float, KS value
+                - `fit_param1`: float, if powerlaw: fitted exponent
+                - `fit_xmin`: float, min value for which the fitted function starts
+                - `fit_xmax`: float, max value for which the fitted function starts
+                - `xmin_search_range`: tuple, range of min values searched for fitting
+                - `xmax_search_range`: tuple, range of max values searched for fitting
+                - `xmax_search_skip`: int, skips in xmax_search_range
+                - `discrete_KSfit`: bool
+            - `ks_test_results`: pandas DataFrame
+                - columns: `"fit_exponent"`, `"fit_xmin"`, `"fit_xmax"`, `"KS"`
+                - rows: `fit_xmax` in `xmax_search_range` with `xmax_search_skip`
+            """
+            file_directory = self.outer._directory
+            ks_test_info = json.load(open(os.path.join(file_directory,"KS_test_info.json"), "r"))
+            ks_test_results = pd.read_pickle(os.path.join(file_directory,"KS_test_results.pdDF"))
+            return ks_test_info, ks_test_results
 
 
 class QuickGraph:
@@ -764,6 +847,7 @@ class NeuroData:
         try: self.configs["data_series_export"]["recovery"]; _ufile = "recv.bin"
         except KeyError: self.configs["data_series_export"]["adaptation"]; _ufile = "adap.bin"
         self.dynamics.time_series_data_from_file(self.configs["num_neuron"],self.directory,"memp.bin",_ufile,"gcde.bin","gcdi.bin","isyn.bin","istc.bin")
+        self.dynamics.init_data_analysis()
 
     def _compatibility(self):
         ### compatibility ###
@@ -817,6 +901,350 @@ class NeuroData:
         self.dynamics.spike_steps = self.dynamics.spike_steps[self.neuron_mask]
         if self._netFound:
             self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(self.neuron_mask),np.array(self.neuron_mask))]
+
+
+class FittingTools:
+
+    def __init__(self):
+        self.ks_test_results_DF = None
+        self.fit_xmin = None
+        self.fit_xmax = None
+        self.fit_alpha = None
+        self.fit_lambda = None
+
+    def load_data(self, data:np.ndarray, sort=True):
+        self.data = np.hstack(data).flatten()
+        if sort: self.data = np.sort(self.data)
+
+    def draw_data_distribution(self, linbinsize=0.001, logbinsize=0.1, ax=None, discrete_data=True, **options):
+        if discrete_data:
+            # for discrete data
+            _x, _y = np.unique(self.data, return_counts=True)
+            _y = _y.astype(float)/_y.sum()
+            # bins, x = get_linlogbins((self.data.min()-linbinsize/2,self.data.max()), linbinsize, logbinsize, return_xcenters=True)
+            bins, x = get_linbins((self.data.min(),self.data.max()), linbinsize, return_xcenters=True)
+            digits = np.digitize(_x, bins) - 1
+            y = np.array([_y[digits == i].sum()/len(np.arange(bins[i], bins[i+1], linbinsize)) for i in range(len(bins) - 1)])
+            x, y = x[y > 0], y[y > 0]
+        else:
+            # for continuous data
+            if logbinsize is None: bins, xcenters = get_linbins(min_max_val=(np.amin(self.data),np.amax(self.data)), binsize=linbinsize, return_xcenters=True)
+            else: bins, xcenters = get_linlogbins(min_max_val=(np.amin(self.data),np.amax(self.data)), linbinsize=linbinsize, logbinsize=logbinsize, return_xcenters=True, print_cutoff=True)
+            x, y = qgraph.prob_dens_plot_CustomBins(self.data, bins=bins, ax=None, plotZero=False, xcenters=xcenters, marker="o", ls="-", mfc="none")
+        if ax is not None:
+            ax.plot(x, y, **options)
+            ax.set_axisbelow(True)
+            ax.grid(True)
+        return x, y
+
+    # def draw_data_distribution(self, linbinsize=0.001, logbinsize=0.1, ax=None, discrete_data=True, **options):
+    #     if discrete_data:
+    #         # for discrete data
+    #         _x, _y = np.unique(self.data, return_counts=True)
+    #         _y = _y.astype(float)/_y.sum()
+    #         bins, x = get_linlogbins((self.data.min()-linbinsize/2,self.data.max()), linbinsize, logbinsize, return_xcenters=True)
+    #         digits = np.digitize(_x, bins) - 1
+    #         y = np.array([_y[digits == i].sum()/len(np.arange(bins[i], bins[i+1], linbinsize)) for i in range(len(bins) - 1)])
+    #         x, y = x[y > 0], y[y > 0]
+    #     else:
+    #         # for continuous data
+    #         if logbinsize is None: bins, xcenters = get_linbins(min_max_val=(np.amin(self.data),np.amax(self.data)), binsize=linbinsize, return_xcenters=True)
+    #         else: bins, xcenters = get_linlogbins(min_max_val=(np.amin(self.data),np.amax(self.data)), linbinsize=linbinsize, logbinsize=logbinsize, return_xcenters=True, print_cutoff=True)
+    #         x, y = qgraph.prob_dens_plot_CustomBins(self.data, bins=bins, ax=None, plotZero=False, xcenters=xcenters, marker="o", ls="-", mfc="none")
+    #     if ax is not None:
+    #         ax.plot(x, y, **options)
+    #         ax.set_axisbelow(True)
+    #         ax.grid(True)
+    #     return x, y
+
+    def perform_exponential_fitting_KS_test_discrete(self, discrete_stepsize:float,
+                                xmin_search_range:tuple[float,float], xmax_search_range:tuple[float,float],
+                                xmin_search_skip=1, xmax_search_skip=1, verbose=False):
+        """
+        `xmin_search_range`: tuple, range of min values searched for fitting
+        `xmax_search_range`: tuple, range of max values searched for fitting
+        `xmin_search_skip`: int, skips in xmin_search_range, default 1 (no skip)
+        `xmax_search_skip`: int, skips in xmax_search_range, default 1 (no skip)
+        """
+        self.data_discrete = np.round(self.data/discrete_stepsize).astype(int)
+        self.xmin_search_range, self.xmax_search_range = xmin_search_range, xmax_search_range
+        self.xmin_search_skip, self.xmax_search_skip = xmin_search_skip, xmax_search_skip
+        self.discrete_KSfit = True
+        if xmin_search_range[0] == xmin_search_range[1]: xmin_chosen = np.array([xmin_search_range[0]])
+        else: xmin_chosen = self.data[np.argwhere((xmin_search_range[0] <= self.data) & (self.data <= xmin_search_range[1]))][::xmin_search_skip].flatten()
+        if xmax_search_range[0] == xmax_search_range[1]: xmax_chosen = np.array([xmax_search_range[0]])
+        else: xmax_chosen = self.data[np.argwhere((xmax_search_range[0] <= self.data) & (self.data <= xmax_search_range[1]))][::xmax_search_skip].flatten()
+        if verbose:
+            print("number of xmin used: {:d}".format(xmin_chosen.shape[0]))
+            print("number of xmax used: {:d}".format(xmax_chosen.shape[0]))
+        ks_test_results = []
+
+        if xmin_chosen.shape[0] == 1:
+            xmin = int(xmin_chosen[0]/discrete_stepsize)
+            for xmax in tqdm(np.round(xmax_chosen/discrete_stepsize).astype(int)):
+                fit = Fit(self.data_discrete, discrete=True, xmin=xmin, xmax=xmax, verbose=False)
+                ks = fit.exponential.KS()
+                fit_lambda = fit.exponential.Lambda/discrete_stepsize
+                xmin, xmax = fit.exponential.xmin*discrete_stepsize, fit.exponential.xmax*discrete_stepsize
+                ks_test_results.append([fit_lambda, xmin, xmax, ks])
+        else:
+            for xmax in tqdm(np.round(xmax_chosen/discrete_stepsize).astype(int)):
+                _ks_test_results = []
+                for xmin in np.round(xmin_chosen/discrete_stepsize).astype(int):
+                    fit = Fit(self.data_discrete, discrete=True, xmin=xmin, xmax=xmax, verbose=False)
+                    ks = fit.exponential.KS()
+                    fit_lambda = fit.exponential.Lambda/discrete_stepsize
+                    xmin, xmax = fit.exponential.xmin*discrete_stepsize, fit.exponential.xmax*discrete_stepsize
+                    _ks_test_results.append([fit_lambda, xmin, xmax, ks])
+                ks_test_results.append(_ks_test_results[np.array(_ks_test_results)[-1].argmin()])
+        self.ks_test_results_DF = pd.DataFrame(data=ks_test_results, columns=["fit_lambda", "fit_xmin", "fit_xmax", "KS"])
+        if verbose: print(self.ks_test_results_DF)
+        self.fit_xmin = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmin"]
+        self.fit_xmax = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmax"]
+        self.fit_lambda = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_lambda"]
+        self.ks = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["KS"]
+        self.kstest_info = {
+            "fit_type": "exponential",
+            "KS": self.ks,
+            "fit_param1": self.fit_lambda,
+            "fit_xmin": self.fit_xmin,
+            "fit_xmax": self.fit_xmax,
+            "xmin_search_range": self.xmin_search_range,
+            "xmax_search_range": self.xmax_search_range,
+            "xmin_search_skip": self.xmin_search_skip,
+            "xmax_search_skip": self.xmax_search_skip,
+            "discrete_KSfit": True
+        }
+
+    def perform_exponential_fitting_KS_test(self, xmin_search_range:tuple[float,float], xmax_search_range:tuple[float,float],
+                                xmin_search_skip=1, xmax_search_skip=1, discrete_KSfit=True, verbose=False):
+        """
+        `xmin_search_range`: tuple, range of min values searched for fitting
+        `xmax_search_range`: tuple, range of max values searched for fitting
+        `xmin_search_skip`: int, skips in xmin_search_range, default 1 (no skip)
+        `xmax_search_skip`: int, skips in xmax_search_range, default 1 (no skip)
+        """
+        self.xmin_search_range, self.xmax_search_range = xmin_search_range, xmax_search_range
+        self.xmin_search_skip, self.xmax_search_skip = xmin_search_skip, xmax_search_skip
+        self.discrete_KSfit = False
+        if xmin_search_range[0] == xmin_search_range[1]: xmin_chosen = np.array([xmin_search_range[0]])
+        else: xmin_chosen = self.data[np.argwhere((xmin_search_range[0] <= self.data) & (self.data <= xmin_search_range[1]))][::xmin_search_skip].flatten()
+
+        if xmax_search_range[0] == xmax_search_range[1]: xmax_chosen = np.array([xmax_search_range[0]])
+        else: xmax_chosen = self.data[np.argwhere((xmax_search_range[0] <= self.data) & (self.data <= xmax_search_range[1]))][::xmax_search_skip].flatten()
+        if verbose:
+            print("number of xmin used: {:d}".format(xmin_chosen.shape[0]))
+            print("number of xmax used: {:d}".format(xmax_chosen.shape[0]))
+        ks_test_results = []
+
+        if xmin_chosen.shape[0] == 1:
+            xmin = xmin_chosen[0]
+            for xmax in tqdm(xmax_chosen):
+                fit = Fit(self.data, discrete=discrete_KSfit, xmin=xmin, xmax=xmax, verbose=False)
+                ks = fit.exponential.KS()
+                fit_lambda = fit.exponential.Lambda
+                xmin, xmax = fit.exponential.xmin, fit.exponential.xmax
+                ks_test_results.append([fit_lambda, xmin, xmax, ks])
+        else:
+            for xmax in tqdm(xmax_chosen):
+                _ks_test_results = []
+                for xmin in xmin_chosen:
+                    fit = Fit(self.data, discrete=discrete_KSfit, xmin=xmin, xmax=xmax, verbose=False)
+                    ks = fit.exponential.KS()
+                    fit_lambda = fit.exponential.Lambda
+                    xmin, xmax = fit.exponential.xmin, fit.exponential.xmax
+                    _ks_test_results.append([fit_lambda, xmin, xmax, ks])
+                ks_test_results.append(_ks_test_results[np.array(_ks_test_results)[-1].argmin()])
+        self.ks_test_results_DF = pd.DataFrame(data=ks_test_results, columns=["fit_lambda", "fit_xmin", "fit_xmax", "KS"])
+        if verbose: print(self.ks_test_results_DF)
+        self.fit_xmin = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmin"]
+        self.fit_xmax = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmax"]
+        self.fit_lambda = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_lambda"]
+        self.ks = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["KS"]
+        self.kstest_info = {
+            "fit_type": "exponential",
+            "KS": self.ks,
+            "fit_param1": self.fit_lambda,
+            "fit_xmin": self.fit_xmin,
+            "fit_xmax": self.fit_xmax,
+            "xmin_search_range": self.xmin_search_range,
+            "xmax_search_range": self.xmax_search_range,
+            "xmin_search_skip": self.xmin_search_skip,
+            "xmax_search_skip": self.xmax_search_skip,
+            "discrete_KSfit": False
+        }
+
+    def perform_powerlaw_fitting_KS_test_discrete(self, discrete_stepsize:float,
+                                        xmin_search_range:tuple[float,float], xmax_search_range:tuple[float,float],
+                                        xmax_search_skip=1, verbose=False):
+        """
+        `xmin_search_range`: tuple, range of min values searched for fitting
+        `xmax_search_range`: tuple, range of max values searched for fitting
+        `xmax_search_skip`: int, skips in xmax_search_range, default 1 (no skip)
+        """
+        self.data_discrete = np.round(self.data/discrete_stepsize).astype(int)
+        self.xmin_search_range, self.xmax_search_range = xmin_search_range, xmax_search_range
+        self.xmax_search_skip, self.discrete_KSfit = xmax_search_skip, True
+        if xmax_search_range[0] == xmax_search_range[1]: xmax_chosen = [xmax_search_range[0]]
+        else: xmax_chosen = self.data[np.argwhere((xmax_search_range[0] <= self.data) & (self.data <= xmax_search_range[1]))][::xmax_search_skip].flatten()
+        if verbose: print("number of xmax used: {:d}".format(xmax_chosen.shape[0]))
+        ks_test_results = []
+
+        for xmax in tqdm(np.round(xmax_chosen/discrete_stepsize).astype(int)):
+            fit = Fit(self.data_discrete, discrete=True,
+                     xmin=(int(xmin_search_range[0]/discrete_stepsize), int(xmin_search_range[1]/discrete_stepsize)),
+                     xmax=xmax, verbose=False)
+            ks = fit.power_law.KS()
+            fit_alpha = fit.power_law.alpha
+            xmin, xmax = fit.power_law.xmin*discrete_stepsize, fit.power_law.xmax*discrete_stepsize
+            ks_test_results.append([fit_alpha, xmin, xmax, ks])
+        self.ks_test_results_DF = pd.DataFrame(data=ks_test_results, columns=["fit_alpha", "fit_xmin", "fit_xmax", "KS"])
+        if verbose: print(self.ks_test_results_DF)
+        self.fit_xmin = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmin"]
+        self.fit_xmax = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmax"]
+        self.fit_alpha = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_alpha"]
+        self.ks = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["KS"]
+        self.kstest_info = {
+            "fit_type": "powerlaw",
+            "KS": self.ks,
+            "fit_param1": self.fit_alpha,
+            "fit_xmin": self.fit_xmin,
+            "fit_xmax": self.fit_xmax,
+            "xmin_search_range": self.xmin_search_range,
+            "xmax_search_range": self.xmax_search_range,
+            "xmin_search_skip": None,
+            "xmax_search_skip": self.xmax_search_skip,
+            "discrete_KSfit": True
+        }
+
+    def perform_powerlaw_fitting_KS_test(self, xmin_search_range:tuple[float,float], xmax_search_range:tuple[float,float],
+                                        xmax_search_skip=1, verbose=False):
+        """
+        `xmin_search_range`: tuple, range of min values searched for fitting
+        `xmax_search_range`: tuple, range of max values searched for fitting
+        `xmax_search_skip`: int, skips in xmax_search_range, default 1 (no skip)
+        """
+        self.xmin_search_range, self.xmax_search_range = xmin_search_range, xmax_search_range
+        self.xmax_search_skip, self.discrete_KSfit = xmax_search_skip, False
+        if xmax_search_range[0] == xmax_search_range[1]: xmax_chosen = [xmax_search_range[0]]
+        else: xmax_chosen = self.data[np.argwhere((xmax_search_range[0] <= self.data) & (self.data <= xmax_search_range[1]))][::xmax_search_skip].flatten()
+        if verbose: print("number of xmax used: {:d}".format(xmax_chosen.shape[0]))
+        ks_test_results = []
+
+        for xmax in tqdm(xmax_chosen):
+            fit = Fit(self.data, discrete=False, xmin=xmin_search_range, xmax=xmax, verbose=False)
+            ks = fit.power_law.KS()
+            fit_alpha = fit.power_law.alpha
+            xmin, xmax = fit.power_law.xmin, fit.power_law.xmax
+            ks_test_results.append([fit_alpha, xmin, xmax, ks])
+        self.ks_test_results_DF = pd.DataFrame(data=ks_test_results, columns=["fit_alpha", "fit_xmin", "fit_xmax", "KS"])
+        if verbose: print(self.ks_test_results_DF)
+        self.fit_xmin = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmin"]
+        self.fit_xmax = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_xmax"]
+        self.fit_alpha = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["fit_alpha"]
+        self.ks = self.ks_test_results_DF.loc[self.ks_test_results_DF["KS"].argmin()]["KS"]
+        self.kstest_info = {
+            "fit_type": "powerlaw",
+            "KS": self.ks,
+            "fit_param1": self.fit_alpha,
+            "fit_xmin": self.fit_xmin,
+            "fit_xmax": self.fit_xmax,
+            "xmin_search_range": self.xmin_search_range,
+            "xmax_search_range": self.xmax_search_range,
+            "xmin_search_skip": None,
+            "xmax_search_skip": self.xmax_search_skip,
+            "discrete_KSfit": False
+        }
+
+    def save_KS_test_results(self, directory:str, results_filename="KS_test_results.pdDF", info_filename="KS_test_info.json"):
+        """Save the K-S test info and K-S test results for different xmax:
+        - `ks_test_info`: dict (json)
+            - `fit_type`: str, can be `powerlaw`, `exponential`
+            - `KS`: float, KS value
+            - `fit_param1`: float, alpha if powerlaw, lambda if exponential
+            - `fit_xmin`: float, min value for which the fitted function starts
+            - `fit_xmax`: float, max value for which the fitted function starts
+            - `xmin_search_range`: tuple, range of min values searched for fitting
+            - `xmax_search_range`: tuple, range of max values searched for fitting
+            - `xmin_search_skip`: int, skips in xmin_search_range, `None` for powerlaw fitting
+            - `xmax_search_skip`: int, skips in xmax_search_range
+            - `discrete_KSfit`: bool
+        - `ks_test_results`: pandas DataFrame
+            - columns: `"fit_alpha"` or `"fit_lambda"`, `"fit_xmin"`, `"fit_xmax"`, `"KS"`
+            - rows: `fit_xmax` in `xmax_search_range` with `xmax_search_skip`
+        """
+        if os.path.isfile(os.path.join(directory,"KS_test_results.pdDF")):
+            _input = input("KS test results exist, attempting overwrite, proceed? (Y/N): ")
+            if _input == "Y" or _input == "y": _write_data = True
+            else: _write_data = False
+        else: _write_data = True
+        if _write_data:
+            open(os.path.join(directory,info_filename), "w").write(json.dumps(self.kstest_info, indent=4))
+            self.ks_test_results_DF.to_pickle(os.path.join(directory,results_filename))
+
+    def load_KS_test_results(self, directory:str, results_filename="KS_test_results.pdDF", info_filename="KS_test_info.json"):
+        """Load the K-S test info and K-S test results for different xmax as a tuple:
+        - `ks_test_info`: dict (json)
+            - `fit_type`: str, can be `powerlaw`, `exponential`
+            - `KS`: float, KS value
+            - `fit_param1`: float, alpha if powerlaw, lambda if exponential
+            - `fit_xmin`: float, min value for which the fitted function starts
+            - `fit_xmax`: float, max value for which the fitted function starts
+            - `xmin_search_range`: tuple, range of min values searched for fitting
+            - `xmax_search_range`: tuple, range of max values searched for fitting
+            - `xmin_search_skip`: int, skips in xmin_search_range, `None` for powerlaw fitting
+            - `xmax_search_skip`: int, skips in xmax_search_range
+            - `discrete_KSfit`: bool
+        - `ks_test_results`: pandas DataFrame
+            - columns: `"fit_alpha"` or `"fit_lambda"`, `"fit_xmin"`, `"fit_xmax"`, `"KS"`
+            - rows: `fit_xmax` in `xmax_search_range` with `xmax_search_skip`
+        """
+        self.ks_test_results_DF = pd.read_pickle(os.path.join(directory,results_filename))
+        self.ks_test_info = json.load(open(os.path.join(directory,info_filename), "r"))
+        self.ks = self.ks_test_info["KS"]
+        if self.ks_test_info["fit_type"] == "powerlaw":
+            self.fit_alpha = self.ks_test_info["fit_param1"]
+        elif self.ks_test_info["fit_type"] == "exponential":
+            self.fit_lambda = self.ks_test_info["fit_param1"]
+        self.fit_xmin = self.ks_test_info["fit_xmin"]
+        self.fit_xmax = self.ks_test_info["fit_xmax"]
+        self.xmin_search_range = self.ks_test_info["xmin_search_range"]
+        self.xmax_search_range = self.ks_test_info["xmax_search_range"]
+        self.xmax_search_skip = self.ks_test_info["xmax_search_skip"]
+        self.discrete_KSfit = self.ks_test_info["discrete_KSfit"]
+        return self.ks_test_results_DF, self.ks_test_info
+
+    def draw_fitted_powerlaw_distribution(self, plot_x, plot_y, ax=None, **options):
+        """`ax`: matplotlib ax to be plotted
+        `plot_x`: x-values of the original data plot
+        `plot_y`: y-values of the original data plot
+        Return the x- and y-values of the fitted plot"""
+        if self.fit_alpha is None: raise ValueError("no power-law fitting data")
+        x_fit = np.arange(self.fit_xmin, self.fit_xmax, (self.fit_xmax-self.fit_xmin)/100)
+        x_gmean = stats.gmean(plot_x[np.argwhere((self.fit_xmin <= plot_x) & (plot_x <= self.fit_xmax))])
+        y_gmean = stats.gmean(plot_y[np.argwhere((self.fit_xmin <= plot_x) & (plot_x <= self.fit_xmax))])
+        y_fit = np.power(x_fit,-self.fit_alpha)*y_gmean/x_gmean**-self.fit_alpha
+        if ax is not None:
+            ax.plot(x_fit, y_fit, **options)
+            ax.set_axisbelow(True)
+            ax.grid(True)
+        return x_fit, y_fit
+
+    def draw_fitted_exponential_distribution(self, plot_x, plot_y, ax=None, **options):
+        """`ax`: matplotlib ax to be plotted
+        `plot_x`: x-values of the original data plot
+        `plot_y`: y-values of the original data plot
+        Return the x- and y-values of the fitted plot"""
+        if self.fit_lambda is None: raise ValueError("no exponential fitting data")
+        x_fit = np.arange(self.fit_xmin, self.fit_xmax, (self.fit_xmax-self.fit_xmin)/100)
+        x_mean = np.mean(plot_x[np.argwhere((self.fit_xmin <= plot_x) & (plot_x <= self.fit_xmax))])
+        y_gmean = stats.gmean(plot_y[np.argwhere((self.fit_xmin <= plot_x) & (plot_x <= self.fit_xmax))])
+        y_fit = np.exp(-self.fit_lambda*x_fit)*y_gmean/np.exp(x_mean*-self.fit_lambda)
+        if ax is not None:
+            ax.plot(x_fit, y_fit, **options)
+            ax.set_axisbelow(True)
+            ax.grid(True)
+        return x_fit, y_fit
 
 
 
