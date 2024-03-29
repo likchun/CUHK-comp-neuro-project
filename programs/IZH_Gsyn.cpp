@@ -445,8 +445,8 @@ namespace fileio
                 ofs << code_ver << '\n'
                     << "------------------------------------------------------------\n"
                     << "computation finished at: " << datetime_buf << '\n'
-                    << "time elapsed: " << time_elapsed << " s\n\n"
-                    << "program name: " << par.program_name << '\n'
+                    << "time elapsed: " << time_elapsed << " s\n"
+                    << "program name: " << par.program_name << "\n\n"
                     << "[network and synaptic weights]" << '\n'
                     << "network file:\t\t\t" << par.infile_weights << '\n'
                     << "number of neurons:\t\t" << par.network_size << '\n'
@@ -463,14 +463,14 @@ namespace fileio
                     << "[initial values]\n"
                     << "membrane potential:\t\t" << par.init_potential << " mV" << '\n'
                     << "recovery variable:\t\t" << par.init_recovery << "\n\n";
-                if ((par.spiketrig_adap_scale_factor_exc!=1) && (par.spiketrig_adap_scale_factor_inh!=1)) {
-                    ofs << "spike-triggered adaptation:"
-                        << "- scale factor (exc):\t\t" << par.spiketrig_adap_scale_factor_exc << '\n'
-                        << "- scale factor (inh):\t\t" << par.spiketrig_adap_scale_factor_inh << '\n';
-                } if ((par.subthresh_adap_scale_factor_exc!=1) && (par.subthresh_adap_scale_factor_inh!=1)) {
-                    ofs << "subthreshold adaptation:"
-                        << "- scale factor (exc):\t\t" << par.subthresh_adap_scale_factor_exc << '\n'
-                        << "- scale factor (inh):\t\t" << par.subthresh_adap_scale_factor_inh << '\n';
+                if (par.spiketrig_adap_scale_factor_exc!=1 || par.spiketrig_adap_scale_factor_inh!=1) {
+                    ofs << "[spike-triggered adaptation]\n"
+                        << "scale factor (exc):\t\t" << par.spiketrig_adap_scale_factor_exc << '\n'
+                        << "scale factor (inh):\t\t" << par.spiketrig_adap_scale_factor_inh << "\n\n";
+                } if (par.subthresh_adap_scale_factor_exc!=1 || par.subthresh_adap_scale_factor_inh!=1) {
+                    ofs << "[subthreshold adaptation]\n"
+                        << "scale factor (exc):\t\t" << par.subthresh_adap_scale_factor_exc << '\n'
+                        << "scale factor (inh):\t\t" << par.subthresh_adap_scale_factor_inh << "\n\n";
                 }
                 ofs << "[other settings]" << '\n'
                     << "spike truncation time:\t\t" << trunc_step_inh*par.stepsize << " ms" << " (inh)\n"
@@ -627,9 +627,18 @@ void display_info(Parameters &par)
               << "|>amplitude:              " << par.current_const << '\n'
               << "|externally stimulated?   " << ((par.infile_stimulus=="none") ? "no" : "yes") << '\n';
     if (par.infile_stimulus!="none") { std::cout << "|>stimulus file:          " << par.infile_stimulus << '\n'; }
-    std::cout << "|spike truncation time:\n"
-              << "|>exc neurons:            " << par.trunc_time_exc << " ms" << '\n'
-              << "|>inh neurons:            " << par.trunc_time_inh << " ms" << '\n';
+    if (par.spiketrig_adap_scale_factor_exc!=1 || par.spiketrig_adap_scale_factor_inh!=1) {
+        std::cout << "|spike-triggered adaptation:\n"
+              << "|>scale factor (exc):     " << par.spiketrig_adap_scale_factor_exc << '\n'
+              << "|>scale factor (inh):     " << par.spiketrig_adap_scale_factor_inh << '\n';
+    } if (par.subthresh_adap_scale_factor_exc!=1 || par.subthresh_adap_scale_factor_inh!=1) {
+        std::cout << "|subthreshold adaptation:\n"
+              << "|>scale factor (exc):     " << par.subthresh_adap_scale_factor_exc << '\n'
+              << "|>scale factor (inh):     " << par.subthresh_adap_scale_factor_inh << '\n';
+    }
+    // std::cout << "|spike truncation time:\n"
+    //           << "|>exc neurons:            " << par.trunc_time_exc << " ms" << '\n'
+    //           << "|>inh neurons:            " << par.trunc_time_inh << " ms" << '\n';
     std::cout << "---------------------------------------------" << std::endl;
 }
 

@@ -3,7 +3,7 @@
 
 Network and synaptic weights
 ----------------------------
-synaptic weights matrix file             = AdjMat.txt
+synaptic weights matrix file             = network_A.txt
 data format#                             = nonzero
 delimiter (space/tab/...)                = space
 exc weights scale factor                 = 1
@@ -38,7 +38,7 @@ Adaptation modifications
 spike-triggered adaptation parameter:
 - scale factor (exc)                     = 1
 - scale factor (inh)                     = 1
-subthreshold adaptation parameter:
+sub-threshold adaptation parameter:
 - scale factor (exc)                     = 1
 - scale factor (inh)                     = 1
 

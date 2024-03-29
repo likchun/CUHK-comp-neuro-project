@@ -3,7 +3,7 @@ MyLib
 -----
 Tools & templates
 
-Last update: 10 Mar, 2024 (pm)
+Last update: 21 Mar, 2024 (pm)
 """
 
 import os
@@ -74,7 +74,7 @@ def get_spike_count(spike_steps:np.ndarray):
 
 def get_mean_spike_rate(spike_steps:np.ndarray, duration_ms:float):
     """unit: Hz"""
-    return np.array(np.array([x.size for x in spike_steps]))/duration_ms*1000
+    return np.array([x.size for x in spike_steps])/duration_ms*1000
 
 def get_average_spike_rate_time_histogram(spike_steps:np.ndarray, stepsize_ms:float, duration_ms:float, binsize_ms:float):
     """Return a tuple:
@@ -128,17 +128,16 @@ def trim_spike_steps(spike_steps:np.ndarray, start_t_ms:float, end_t_ms:float, s
     return np.array([np.array(ss[np.where((start_t_ms/stepsize_ms < np.array(ss)) & (np.array(ss) < end_t_ms/stepsize_ms))], dtype=int) for ss in spike_steps], dtype=object)
 
 
-def get_C_measure(binsize_ms:float, spike_steps:np.ndarray, stepsize_ms:float, duration_ms:float):
-    boolmask = [False if s.size!=0 else True for s in spike_steps]
-    num_bin = int(duration_ms//binsize_ms)+1
-    bins = np.linspace(0,binsize_ms*num_bin,num_bin)
-    numspike, binedge = np.histogram(np.hstack(spike_steps*stepsize_ms), bins)
-    avgfr = (numspike/(binedge[1:]-binedge[:-1])*1000/spike_steps.size)[:-1]
-    numspikes = np.array([np.histogram(np.hstack(spike_steps[i]*stepsize_ms), bins)[0] if spike_steps[i].size!=0 else np.zeros(numspike.size) for i in range(spike_steps.size)])
-    fr = (numspikes/(binedge[1:]-binedge[:-1])*1000)[:,:-1]
 
-    m1, m2 = [fr[i].mean() for i in range(spike_steps.size)], avgfr.mean()
-    return np.array([( np.dot(avgfr,fr[i]) / avgfr.size - m1[i]*m2 ) / ( np.sqrt(np.mean((fr[i]-m1[i])**2)) * np.sqrt(np.mean((avgfr-m2)**2)) ) for i in range(spike_steps.size)])
+def get_coherence_parameter(binsize_ms:float, spike_times:np.ndarray, duration_ms:float, retfluct=False):
+    num_neuron = spike_times.shape[0]
+    bins = np.linspace(0, duration_ms, int(duration_ms/binsize_ms)+1)
+    binned_train = np.array([np.histogram(spike_times[i], bins=bins)[0] for i in range(num_neuron)])
+    avg_binned_train = binned_train.mean(axis=0)
+    fluct_avg = np.power(avg_binned_train,2).mean() - avg_binned_train.mean()**2
+    fluct_each = np.mean([np.power(binned_train[i],2).mean() - binned_train[i].mean()**2 for i in range(num_neuron)])
+    if retfluct: return fluct_avg/fluct_each, fluct_avg, fluct_each
+    else: return fluct_avg/fluct_each
 
 
 
@@ -290,6 +289,19 @@ class NeuronalNetwork:
         self.adjacency_matrix = None
         self.link_ij = None
         self._neuron_type = None
+        self._neuron_mask = None
+        self._activated_neuron_mask = False
+        self._adjacency_matrix_original = None
+
+    def _set_neuron_mask(self, valid_idx:list):
+        if self.adjacency_matrix is None: raise ValueError("")
+        self._neuron_mask = np.array([True if i in valid_idx else False for i in range(self.configs["num_neuron"])])
+        if not self._activated_neuron_mask:
+            self._adjacency_matrix_original = np.copy(self.adjacency_matrix)
+            self.adjacency_matrix = self.adjacency_matrix[np.ix_(np.array(self._neuron_mask),np.array(self._neuron_mask))]
+        else:
+            self.adjacency_matrix = self._adjacency_matrix_original[np.ix_(np.array(self._neuron_mask),np.array(self._neuron_mask))]
+        self._activated_neuron_mask = True
 
     def adjacency_matrix_from_file(self, filepath:str):
         """
@@ -468,6 +480,7 @@ class NeuronalDynamics:
         self._num_step = int(duration_ms/stepsize_ms)
         self._num_step_orig = int(duration_ms/stepsize_ms)
         self.spike_steps = load_spike_steps(os.path.join(self._directory,"spks.txt"))
+        self._num_neuron = self.spike_steps.shape[0]
         self._spike_times = None
         self._spike_train = None
         self._spike_count = None
@@ -476,12 +489,31 @@ class NeuronalDynamics:
         self._network_spike_times = None
         self._interevent_intervals = None
         self._interevent_intervals_insteps = None
-        self._avg_spike_rate_binned = None
-        self._avg_spike_rate_gauskern = None
         self.time_series = None
         self.analysis = None
+        self._activated_neuron_mask = False
+        self._neuron_mask = None
+        self._spike_steps_original = None
 
-    def _reset_all(self):
+    def _set_neuron_mask(self, neuron_mask:list):
+        self._neuron_mask = neuron_mask
+        if not self._activated_neuron_mask:
+            self._spike_steps_original = np.copy(self.spike_steps)
+            self._spike_steps = self._spike_steps[self._neuron_mask]
+        else:
+            self._spike_steps = self._spike_steps_original[self._neuron_mask]
+            self._reset_all(reset_neuron_mask=False)
+        self._activated_neuron_mask = True
+        if self._spike_times is not None: self._spike_times = self._spike_times[self._neuron_mask]
+        if self._spike_train is not None: self._spike_train = self._spike_train[self._neuron_mask,:]
+        if self._spike_count is not None: self._spike_count = self._spike_count[self._neuron_mask]
+        if self._mean_spike_rate is not None: self._mean_spike_rate = self._mean_spike_rate[self._neuron_mask]
+        if self._interspike_intervals is not None: self._interspike_intervals = self._interspike_intervals[self._neuron_mask]
+        self._network_spike_times = None
+        self._interevent_intervals = None
+        self._interevent_intervals_insteps = None
+
+    def _reset_all(self, reset_neuron_mask=True):
         self._spike_times = None
         self._spike_train = None
         self._spike_count = None
@@ -490,8 +522,10 @@ class NeuronalDynamics:
         self._network_spike_times = None
         self._interevent_intervals = None
         self._interevent_intervals_insteps = None
-        self._avg_spike_rate_binned = None
-        self._avg_spike_rate_gauskern = None
+        if reset_neuron_mask:
+            self._activated_neuron_mask = False
+            self._neuron_mask = None
+            self._spike_steps_original = None
 
     @property
     def spike_steps(self): return self._spike_steps
@@ -619,44 +653,22 @@ class NeuronalDynamics:
             self._num_step_beg_trim = int(trim_beg_t_ms/stepsize_ms)
             self._num_step_end_trim = int(trim_end_t_ms/stepsize_ms)
 
-    def time_series_data_from_file(self, num_neuron:int, directory:str,
+    def _time_series_data_from_file(self, num_neuron:int, directory:str,
             potential="memp.bin", adaptation="recv.bin", conductance_exc="gcde.bin",
             conductance_inh="gcdi.bin", synap_current="curr.bin", stoch_current="stoc.bin"):
         self.time_series = self._time_series_handler(num_neuron, directory, potential, adaptation,
             conductance_exc, conductance_inh, synap_current, stoch_current)
 
-    def init_data_analysis(self):
+    def _init_data_analysis(self):
         self.analysis = self._analysis(self)
 
     class _analysis:
 
         def __init__(self, outer_instance):
-            self.outer = outer_instance
+            self._outer = outer_instance
 
-        def C_measure(self, binsize_ms:float):
-            return get_C_measure(binsize_ms, self.outer._spike_steps, self.outer._stepsize_ms, self.outer._duration_ms)
-
-        @property
-        def KS_test_results(self):
-            """Load the K-S test info and K-S test results for different xmax as a tuple:
-            - `ks_test_info`: dict (json)
-                - `fit_type`: str, can be `powerlaw`, `exp`
-                - `KS`: float, KS value
-                - `fit_param1`: float, if powerlaw: fitted exponent
-                - `fit_xmin`: float, min value for which the fitted function starts
-                - `fit_xmax`: float, max value for which the fitted function starts
-                - `xmin_search_range`: tuple, range of min values searched for fitting
-                - `xmax_search_range`: tuple, range of max values searched for fitting
-                - `xmax_search_skip`: int, skips in xmax_search_range
-                - `discrete_KSfit`: bool
-            - `ks_test_results`: pandas DataFrame
-                - columns: `"fit_exponent"`, `"fit_xmin"`, `"fit_xmax"`, `"KS"`
-                - rows: `fit_xmax` in `xmax_search_range` with `xmax_search_skip`
-            """
-            file_directory = self.outer._directory
-            ks_test_info = json.load(open(os.path.join(file_directory,"KS_test_info.json"), "r"))
-            ks_test_results = pd.read_pickle(os.path.join(file_directory,"KS_test_results.pdDF"))
-            return ks_test_info, ks_test_results
+        def coherence_parameter(self, binsize_ms:float, retfluct=False):
+            return get_coherence_parameter(binsize_ms, self._outer.spike_times, self._outer._duration_ms, retfluct=retfluct)
 
 
 class QuickGraph:
@@ -707,7 +719,7 @@ class QuickGraph:
         elif type(colors)==str: colors = [colors for _ in range(spike_times.size)]
         if time_range_ms[0] == "auto": time_range_ms[0] = float(np.amin([x[0] for x in spike_times if x.size != 0]))
         if time_range_ms[1] == "auto": time_range_ms[1] = float(np.amax([x[-1] for x in spike_times if x.size != 0]))
-        spike_times = np.array([x[np.where((time_range_ms[0] < np.array(x)) & (np.array(x) < time_range_ms[1]))] for x in spike_times],dtype=object)
+        # spike_times = np.array([x[np.where((time_range_ms[0] < np.array(x)) & (np.array(x) < time_range_ms[1]))] for x in spike_times],dtype=object)
         # [ax.scatter(x/1000, np.full(x.size, i+1), c=colors[i], lw=0, **options) for i,x in enumerate(spike_times)]
         [ax.plot(x/1000, np.full(x.size, i+1), c=colors[i], lw=0, **options) for i,x in enumerate(spike_times)]
 
@@ -813,8 +825,14 @@ class NeuroData:
 
         Network:
         - `network_file`: str
-        - `weightscale_factor_exc`: float
-        - `weightscale_factor_inh`: float
+        - `weight_scale_exc`: float
+        - `weight_scale_inh`: float
+
+        Adaptation modifications:
+        - `spiketrig_adap_scale_exc`: float
+        - `spiketrig_adap_scale_inh`: float
+        - `subthresh_adap_scale_exc`: float
+        - `subthresh_adap_scale_inh`: float
 
         Other settings:
         - `init_potential`: float
@@ -839,15 +857,16 @@ class NeuroData:
             except FileNotFoundError:
                 if not self._suppress_warning: print("Warning: network file not found. \"network\" functions cannot be used. Note: to access the network file, put it into the same the directory as this script.")
         if self._netFound:
-            self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor_exc"], neuron_type="exc")
-            self.network.scale_synaptic_weights(scale=self.configs["weightscale_factor_inh"], neuron_type="inh")
+            self.network.scale_synaptic_weights(scale=self.configs["weight_scale_exc"], neuron_type="exc")
+            self.network.scale_synaptic_weights(scale=self.configs["weight_scale_inh"], neuron_type="inh")
         else: del self.network
 
         self.dynamics = NeuronalDynamics(os.path.join(directory),self.configs["stepsize_ms"],self.configs["duration_ms"])
         try: self.configs["data_series_export"]["recovery"]; _ufile = "recv.bin"
         except KeyError: self.configs["data_series_export"]["adaptation"]; _ufile = "adap.bin"
-        self.dynamics.time_series_data_from_file(self.configs["num_neuron"],self.directory,"memp.bin",_ufile,"gcde.bin","gcdi.bin","isyn.bin","istc.bin")
-        self.dynamics.init_data_analysis()
+        self.dynamics._time_series_data_from_file(self.configs["num_neuron"],self.directory,"memp.bin",_ufile,"gcde.bin","gcdi.bin","isyn.bin","istc.bin")
+        self.dynamics._init_data_analysis()
+        self._activated_neuron_mask = False
 
     def _compatibility(self):
         ### compatibility ###
@@ -855,10 +874,12 @@ class NeuroData:
         except KeyError: self.configs["stepsize_ms"] = self.configs["dt_ms"]
         try: self.configs["num_neuron"]
         except KeyError: self.configs["num_neuron"] = self.configs["neuron_num"]
-        try: self.configs["weightscale_factor_exc"]
+        try: self.configs["weight_scale_exc"]
         except KeyError:
-            try: self.configs["weightscale_factor_exc"],self.configs["weightscale_factor_inh"] = self.configs["weightscale_factor"], self.configs["weightscale_factor"]
-            except KeyError: self.configs["weightscale_factor_exc"],self.configs["weightscale_factor_inh"] = self.configs["beta"], self.configs["beta"]
+            try: self.configs["weight_scale_exc"],self.configs["weight_scale_inh"] = self.configs["weightscale_factor_exc"], self.configs["weightscale_factor_inh"]
+            except KeyError:
+                try: self.configs["weightscale_factor_exc"],self.configs["weightscale_factor_inh"] = self.configs["weightscale_factor"], self.configs["weightscale_factor"]
+                except KeyError: self.configs["weightscale_factor_exc"],self.configs["weightscale_factor_inh"] = self.configs["beta"], self.configs["beta"]
         try: self.configs["noise_intensity"]
         except KeyError:
             try: self.configs["noise_intensity"] = self.configs["noiselv"]
@@ -869,6 +890,17 @@ class NeuroData:
         self.configs["num_step"] = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
         yaml.dump(self.configs, open(os.path.join(self.directory, "sett.yml"), 'w'), default_flow_style=False)
 
+    def apply_neuron_mask(self, valid_idx:list):
+        self._activated_neuron_mask = True
+        self.neuron_mask = np.array([True if i in valid_idx else False for i in range(self.configs["num_neuron"])])
+        self.dynamics._set_neuron_mask(self.neuron_mask)
+
+    def dismiss_neuron_mask(self):
+        self._activated_neuron_mask = False
+        self.neuron_mask = np.full(self.configs["num_neuron"], True)
+        self.dynamics._set_neuron_mask(self.neuron_mask)
+        self.dynamics._activated_neuron_mask = False
+
     def remove_dynamics(self, remove_beg_t_ms:float, remove_end_t_ms:float):
         """remove the first `remove_beg_t_ms` ms and the last `remove_end_t_ms` ms"""
         self.dynamics._reset_all()
@@ -877,30 +909,32 @@ class NeuroData:
         self.dynamics._duration_ms -= remove_beg_t_ms+remove_end_t_ms
         self.dynamics._num_step = int(self.configs["duration_ms"]/self.configs["stepsize_ms"])
         self.dynamics.time_series.set_trim_duration(remove_beg_t_ms, remove_end_t_ms, self.configs["stepsize_ms"])
+        if self._activated_neuron_mask: self.dynamics._set_neuron_mask(self.neuron_mask)
 
     def retain_dynamics(self, beg_t_ms:float, end_t_ms:float):
         """retain only dynamics from `beg_t_ms` to `end_t_ms`"""
         self.remove_dynamics(beg_t_ms, self.configs["duration_ms"]-end_t_ms)
+        if self._activated_neuron_mask: self.dynamics._set_neuron_mask(self.neuron_mask)
 
-    def remove_neurons(self, remove_index:list):
-        """`remove_index`: a list of indices of neurons to be removed"""
-        self.neuron_mask = np.full(self.configs["num_neuron"], True)
-        self.neuron_mask[remove_index] = False
-        self.configs["num_neuron"] -= len(remove_index)
-        self.dynamics._reset_all()
-        self.dynamics.spike_steps = self.dynamics.spike_steps[self.neuron_mask]
-        if self._netFound:
-            self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(self.neuron_mask),np.array(self.neuron_mask))]
+    # def remove_neurons(self, remove_index:list):
+    #     """`remove_index`: a list of indices of neurons to be removed"""
+    #     neuron_mask = np.full(self.configs["num_neuron"], True)
+    #     neuron_mask[remove_index] = False
+    #     self.configs["num_neuron"] -= len(remove_index)
+    #     self.dynamics._reset_all()
+    #     self.dynamics.spike_steps = self.dynamics.spike_steps[neuron_mask]
+    #     if self._netFound:
+    #         self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(neuron_mask),np.array(neuron_mask))]
 
-    def retain_neurons(self, retain_index:list):
-        """`retain_index`: a list of indices of neurons to be retained, other neurons are removed"""
-        self.neuron_mask = np.full(self.configs["num_neuron"], False)
-        self.neuron_mask[retain_index] = True
-        self.configs["num_neuron"] = len(retain_index)
-        self.dynamics._reset_all()
-        self.dynamics.spike_steps = self.dynamics.spike_steps[self.neuron_mask]
-        if self._netFound:
-            self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(self.neuron_mask),np.array(self.neuron_mask))]
+    # def retain_neurons(self, retain_index:list):
+    #     """`retain_index`: a list of indices of neurons to be retained, other neurons are removed"""
+    #     neuron_mask = np.full(self.configs["num_neuron"], False)
+    #     neuron_mask[retain_index] = True
+    #     self.configs["num_neuron"] = len(retain_index)
+    #     self.dynamics._reset_all()
+    #     self.dynamics.spike_steps = self.dynamics.spike_steps[neuron_mask]
+    #     if self._netFound:
+    #         self.network.adjacency_matrix = self.network.adjacency_matrix[np.ix_(np.array(neuron_mask),np.array(neuron_mask))]
 
 
 class FittingTools:
@@ -1273,6 +1307,9 @@ nd = NeuroData(directory)
 fig, ax = plt.subplots(figsize=(5,5))
 fig, axes = plt.subplots(3, 2, figsize=(10,5), sharex=True, sharey=True)
 gridspec_kw={"width_ratios":[.7,1]}
+gridspec_kw={"height_ratios":[1,.7]}
+
+qgraph.raster_plot(nd.dynamics.spike_times, ax=ax, colors="k", marker=".", ms=3, mec="none")
 
 
 ### legend size and location ###
@@ -1299,3 +1336,39 @@ ax1d = div1.append_axes("bottom", "60%", pad=.2, sharex=ax1a)
 axes1 = [ax1a, ax1b, ax1c, ax1d]
 
 """
+
+
+
+# def get_correlation_measure(binsize_ms:float, spike_steps:np.ndarray, stepsize_ms:float, duration_ms:float):
+#     boolmask = [False if s.size!=0 else True for s in spike_steps]
+#     num_bin = int(duration_ms//binsize_ms)+1
+#     bins = np.linspace(0,binsize_ms*num_bin,num_bin)
+#     numspike, binedge = np.histogram(np.hstack(spike_steps*stepsize_ms), bins)
+#     avgfr = (numspike/(binedge[1:]-binedge[:-1])*1000/spike_steps.size)[:-1]
+#     numspikes = np.array([np.histogram(np.hstack(spike_steps[i]*stepsize_ms), bins)[0] if spike_steps[i].size!=0 else np.zeros(numspike.size) for i in range(spike_steps.size)])
+#     fr = (numspikes/(binedge[1:]-binedge[:-1])*1000)[:,:-1]
+#     m1, m2 = [fr[i].mean() for i in range(spike_steps.size)], avgfr.mean()
+#     return np.array([( np.dot(avgfr,fr[i]) / avgfr.size - m1[i]*m2 ) / ( np.sqrt(np.mean((fr[i]-m1[i])**2)) * np.sqrt(np.mean((avgfr-m2)**2)) ) for i in range(spike_steps.size)])
+
+
+        # @property
+        # def KS_test_results(self):
+        #     """Load the K-S test info and K-S test results for different xmax as a tuple:
+        #     - `ks_test_info`: dict (json)
+        #         - `fit_type`: str, can be `powerlaw`, `exp`
+        #         - `KS`: float, KS value
+        #         - `fit_param1`: float, if powerlaw: fitted exponent
+        #         - `fit_xmin`: float, min value for which the fitted function starts
+        #         - `fit_xmax`: float, max value for which the fitted function starts
+        #         - `xmin_search_range`: tuple, range of min values searched for fitting
+        #         - `xmax_search_range`: tuple, range of max values searched for fitting
+        #         - `xmax_search_skip`: int, skips in xmax_search_range
+        #         - `discrete_KSfit`: bool
+        #     - `ks_test_results`: pandas DataFrame
+        #         - columns: `"fit_exponent"`, `"fit_xmin"`, `"fit_xmax"`, `"KS"`
+        #         - rows: `fit_xmax` in `xmax_search_range` with `xmax_search_skip`
+        #     """
+        #     file_directory = self.outer._directory
+        #     ks_test_info = json.load(open(os.path.join(file_directory,"KS_test_info.json"), "r"))
+        #     ks_test_results = pd.read_pickle(os.path.join(file_directory,"KS_test_results.pdDF"))
+        #     return ks_test_info, ks_test_results
