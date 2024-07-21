@@ -2,4 +2,4 @@
 
 Download this repository to obtain:
 - Source code of simulation program
-- Python scripts for figures
+- Python scripts for data analyses and figures
