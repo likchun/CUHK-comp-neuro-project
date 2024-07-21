@@ -2,7 +2,7 @@ import os, sys
 
 this_dir = sys.path[0]
 
-_base_dir = "/Users/likchun/NeuroProject-CUHKPhys"
+_base_dir = ""
 
 network_A = os.path.join(_base_dir, "Networks/network_A.txt")
 
