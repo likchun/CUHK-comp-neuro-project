@@ -10,4 +10,4 @@ Example compile command using clang in MacOS: clang++ ./IZH-Gsyn.cpp -std=c++17 
 
 To perform data analyses or generate figures, open the folder /Script as root directory and execute the Python scripts.
 
-Download the project data from \href{https://mycuhk-my.sharepoint.com/:f:/g/personal/1155110651_link_cuhk_edu_hk/Es7LOJi2K3NGrlClUK2Ez6MB4RwJKcx4tLhgs3POXbdOlg}{OneDrive}.
+Download the project data from [OneDrive]{https://mycuhk-my.sharepoint.com/:f:/g/personal/1155110651_link_cuhk_edu_hk/Es7LOJi2K3NGrlClUK2Ez6MB4RwJKcx4tLhgs3POXbdOlg}.
