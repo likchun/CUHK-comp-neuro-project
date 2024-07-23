@@ -1,4 +1,5 @@
 # CUHK-comp-neuro-project
+July 2024
 
 Download this repository to obtain:
 - Source code of simulation program
