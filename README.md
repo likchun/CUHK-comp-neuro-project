@@ -8,4 +8,6 @@ The source code is intended to be compiled in C++ version 11 or later with boost
 
 Example compile command using clang in MacOS: clang++ ./IZH-Gsyn.cpp -std=c++17 -O3 -o ./IZH-Gsyn.o -I"/.../boost\_1\_78\_0"
 
-To perform data analyses or generate figures, open /Script as root directory and execute the Python scripts.
+To perform data analyses or generate figures, open the folder /Script as root directory and execute the Python scripts.
+
+Download the project data from \href{https://mycuhk-my.sharepoint.com/:f:/g/personal/1155110651_link_cuhk_edu_hk/Es7LOJi2K3NGrlClUK2Ez6MB4RwJKcx4tLhgs3POXbdOlg}{OneDrive}.
